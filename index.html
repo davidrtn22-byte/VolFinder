@@ -65,32 +65,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#EFEAE0;
-    --surface:#F7F4EC;
-    --surface-2:#FFFFFF;
-    --ink:#1B2430;
-    --muted:#5B6572;
-    --accent:#B4750E;
-    --accent-ink:#FFFFFF;
-    --accent-2:#12746B;
-    --line:rgba(27,36,48,0.16);
-    --danger:#B3392C;
-    --good:#2E7D4F;
-    --accent-3:#7C3AED;
+    color-scheme: dark;
+    --bg:#0E141B;
+    --surface:#151E28;
+    --surface-2:#1C2733;
+    --ink:#E7EAED;
+    --muted:#9AA7B3;
+    --accent:#E8A33D;
+    --accent-ink:#10161D;
+    --accent-2:#57C7BC;
+    --line:rgba(255,255,255,0.14);
+    --danger:#E2665A;
+    --good:#5FCB8B;
+    --accent-3:#A78BFA;
     --font-display:'Space Grotesk','Segoe UI',Helvetica,Arial,sans-serif;
     --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  }
-  @media (prefers-color-scheme: dark){
-    :root:not([data-theme="light"]){
-      --bg:#10161D; --surface:#161F29; --surface-2:#1C2733; --ink:#E7EAED;
-      --muted:#93A0AC; --accent:#E8A33D; --accent-ink:#10161D; --accent-2:#57C7BC;
-      --line:rgba(255,255,255,0.14); --danger:#E2665A; --good:#5FCB8B; --accent-3:#A78BFA;
-    }
-  }
-  :root[data-theme="dark"]{
-    --bg:#10161D; --surface:#161F29; --surface-2:#1C2733; --ink:#E7EAED;
-    --muted:#93A0AC; --accent:#E8A33D; --accent-ink:#10161D; --accent-2:#57C7BC;
-    --line:rgba(255,255,255,0.14); --danger:#E2665A; --good:#5FCB8B; --accent-3:#A78BFA;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -146,17 +135,28 @@
   .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;}
   .col{display:flex; flex-direction:column; gap:6px;}
 
-  button.btn{
-    font-family:var(--font-mono); font-size:12.5px; cursor:pointer;
-    padding:8px 13px; border-radius:3px; border:1px solid var(--line);
-    background:var(--surface-2); color:var(--ink);
+  .btn{
+    font-family:var(--font-mono); font-size:13px; cursor:pointer; user-select:none;
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:10px 20px; min-height:42px; border-radius:999px; border:1.5px solid var(--line);
+    background:var(--surface-2); color:var(--ink); transition:border-color .15s, background .15s, transform .05s;
   }
-  button.btn:hover{border-color:var(--accent);}
-  button.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600;}
-  button.btn:disabled{opacity:0.4; cursor:not-allowed;}
+  .btn svg{width:17px;height:17px;flex:0 0 auto;}
+  .btn:hover{border-color:var(--accent);}
+  .btn:active{transform:scale(0.98);}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn.ghost{background:transparent; border-color:var(--accent); color:var(--accent); font-weight:600;}
+  .btn.ghost:hover{background:rgba(232,163,61,0.12);}
+  .btn.small{padding:6px 14px; min-height:32px; font-size:12px;}
+  .btn.reset{background:transparent; border-color:rgba(226,102,90,0.55); color:var(--danger); margin-left:auto;}
+  .btn.reset:hover{background:rgba(226,102,90,0.12); border-color:var(--danger);}
+  .btn:disabled{opacity:0.4; cursor:not-allowed;}
+  .btn:focus-visible, select:focus-visible, input:focus-visible{outline:2px solid var(--accent-2); outline-offset:2px;}
+  .actions{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:4px 0 14px;}
   input[type=text], input[type=number], select{
-    font-family:var(--font-mono); font-size:13px; padding:7px 9px; border-radius:3px;
-    border:1px solid var(--line); background:var(--surface-2); color:var(--ink); width:150px;
+    font-family:var(--font-mono); font-size:13px; padding:9px 12px; border-radius:12px; min-height:40px;
+    border:1px solid var(--line); background:var(--surface-2); color:var(--ink); width:190px; max-width:100%;
   }
   label.small{font-size:11.5px; color:var(--muted); display:block; margin-bottom:3px;}
 
@@ -288,11 +288,11 @@
         </div>
         <div class="note">
           <strong>Protocolo de captura para una detección automática correcta:</strong>
-          envase completo en el encuadre y, a su lado, una <strong>moneda colombiana</strong> ($100, $200, $500 o $1.000) a la <strong>misma distancia de la cámara</strong> que el envase, sin tocarlo ni taparlo, y que se vea grande (≥ 5 % del ancho de la foto).
+          envase completo en el encuadre y <strong>centrado</strong>, con una <strong>moneda colombiana</strong> parada o acostada junto a su base (al frente o al lado), a la <strong>misma distancia de la cámara</strong> que el envase, y que se vea grande (≥ 5 % del ancho de la foto). Elige abajo qué moneda usaste.
           <ul style="margin:6px 0 0 18px;padding:0;">
-            <li><strong>Envase de pie:</strong> moneda de pie a su lado (apoyada contra algo), cámara de frente o algo elevada (hasta ≈ 45°). Si prefieres la moneda acostada sobre la mesa, elígelo abajo.</li>
-            <li><strong>Envase acostado:</strong> moneda acostada sobre la mesa junto a él; cámara desde arriba o en diagonal, con el envase atravesado (de lado) frente a la cámara, no apuntando hacia ella.</li>
-            <li>Cualquier fondo sirve si el envase contrasta con él. Sin reflejos fuertes. Usa la foto original de la cámara (conserva los datos de zoom que mejoran la precisión).</li>
+            <li><strong>Envase de pie:</strong> moneda de pie junto a la base (puede tocarlo), cámara de frente o algo elevada (hasta ≈ 45°). Si la moneda está acostada sobre la mesa, elígelo en "Posición de la moneda".</li>
+            <li><strong>Envase acostado:</strong> moneda acostada sobre la mesa junto a él; cámara desde arriba o en diagonal, con el envase atravesado (de lado) frente a la cámara.</li>
+            <li>Mejor sobre una superficie opaca (mesón, mesa de madera); el vidrio y los espejos generan reflejos que confunden la silueta. Sin reflejos fuertes. Usa la foto original de la cámara (conserva los datos de zoom que mejoran la precisión).</li>
           </ul>
         </div>
 
@@ -300,16 +300,18 @@
           <div class="col">
             <label class="small">Moneda usada en la foto</label>
             <select id="coinSelect">
-              <option value="23.7" selected>$500 (23,7 mm)</option>
-              <option value="23">$100 (23 mm)</option>
-              <option value="24.4">$200 (24,4 mm)</option>
+              <option value="22.4" selected>$200 nueva (22,4 mm)</option>
+              <option value="24.4">$200 antigua (24,4 mm)</option>
+              <option value="23.7">$500 (23,7 mm)</option>
+              <option value="23">$100 plateada (23 mm)</option>
+              <option value="20.3">$100 dorada nueva (20,3 mm)</option>
               <option value="21.67">$1.000 (21,67 mm)</option>
               <option value="custom">Otra (escribir diámetro)</option>
             </select>
           </div>
           <div class="col">
             <label class="small">Diámetro (mm)</label>
-            <input type="number" id="coinDiameterMm" value="23.7" step="0.01" min="5">
+            <input type="number" id="coinDiameterMm" value="22.4" step="0.01" min="5">
           </div>
         </div>
         <div class="row">
@@ -331,16 +333,21 @@
           </div>
         </div>
 
-        <div class="row">
-          <label class="btn">
+        <div class="actions">
+          <label class="btn primary" for="fileUpload">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
             Subir imagen
             <input type="file" accept="image/*" id="fileUpload" style="display:none;">
           </label>
-          <label class="btn">
+          <label class="btn ghost" for="fileCamera">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>
             Tomar foto
             <input type="file" accept="image/*" capture="environment" id="fileCamera" style="display:none;">
           </label>
-          <button class="btn" id="btnResetAll">Reiniciar todo</button>
+          <button class="btn small reset" id="btnResetAll" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+            Reiniciar todo
+          </button>
         </div>
 
         <div class="canvas-wrap" id="canvasWrap">
@@ -360,7 +367,7 @@
       <section class="panel" data-step="2">
         <div class="panel-title">
           <h2>2 · Detección automática</h2>
-          <button class="btn" id="btnReanalyze">Reprocesar</button>
+          <button class="btn ghost small" id="btnReanalyze" type="button">Reprocesar</button>
         </div>
         <div class="canvas-wrap" id="canvasWrap2">
           <div class="placeholder" id="placeholder2">Vuelve al paso 1 y analiza una foto.</div>
@@ -493,7 +500,7 @@
     step: 1,
     imageLoaded: false,
     imgW: 0, imgH: 0,
-    coinDiameterMm: 23.7,
+    coinDiameterMm: 22.4,
     posture: 'auto',   // 'auto' | 'standing' | 'lying'
     coinPose: 'auto',  // 'auto' | 'standing' | 'lying'
     focal35: 0,        // focal length (35 mm equivalent) from EXIF, 0 = unknown
@@ -652,7 +659,7 @@
     saveLocal();
   });
   document.getElementById('coinDiameterMm').addEventListener('input', function(e){
-    state.coinDiameterMm = parseFloat(e.target.value)||23.7;
+    state.coinDiameterMm = parseFloat(e.target.value)||22.4;
     syncCoinSelect();
     saveLocal();
   });
@@ -747,7 +754,8 @@
     function T(m){ mats.push(m); return m; }
     var W = src.cols, H = src.rows;
     var coinDcm = (opts.coinDiameterMm || 23.7)/10;
-    function fail(msg){ return {ok:false, error:msg}; }
+    var dbgFg = null, dbgState = null;
+    function fail(msg){ var r={ok:false, error:msg, info:dbgState}; if(opts.debug && dbgFg) r.debug={mask:Array.from(dbgFg.data)}; return r; }
     try{
       var rgb = T(new cv.Mat());
       cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
@@ -788,9 +796,20 @@
           if(sum<thr) colSmall.data[i2] = 255;
         }
       })();
+      // Seeds. Outer border = surely background; a wider band around it = probably
+      // background (the surface and wall the bottle stands on); a small disc at the
+      // centre of the picture = surely object (the protocol asks to centre the bottle);
+      // everything else = probably object.
+      var band = Math.max(ring+2, Math.round((opts.seedBand!==undefined?opts.seedBand:0.08)*Math.min(sw,sh)));
+      var bmul = (opts.bottomMult!==undefined?opts.bottomMult:3);
+      var cxs = sw/2, cys = sh/2, rc = Math.max(3, 0.035*Math.min(sw,sh));
       for(var y=0;y<sh;y++){
         for(var x=0;x<sw;x++){
-          if(y<ring || y>=sh-ring || x<ring || x>=sw-ring) gcMask.data[y*sw+x] = cv.GC_BGD;
+          var v = cv.GC_PR_FGD;
+          if(opts.seedBand!==0 && (y>=sh-band*1.5 || x<band || x>=sw-band || (opts.topBand && y<band))) v = cv.GC_PR_BGD;
+          if(y<ring || y>=sh-ring*bmul || x<ring || x>=sw-ring) v = cv.GC_BGD;
+          if((x-cxs)*(x-cxs)+(y-cys)*(y-cys) < rc*rc) v = cv.GC_FGD;
+          gcMask.data[y*sw+x] = v;
         }
       }
       var bgdModel = T(new cv.Mat()), fgdModel = T(new cv.Mat());
@@ -803,6 +822,7 @@
       var k5 = T(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5)));
       cv.morphologyEx(fg, fg, cv.MORPH_OPEN, k5);
       cv.morphologyEx(fg, fg, cv.MORPH_CLOSE, k5);
+      dbgFg = fg;
 
       var contours = T(new cv.MatVector()), hier = T(new cv.Mat());
       cv.findContours(fg, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
@@ -849,7 +869,27 @@
         return s/c;
       }
       var coin = null, cands = [];
-      function considerCoin(it, fromColour){
+      // Edge map (working scale) used to check that a candidate outline is real.
+      var ws = Math.min(1, 800/Math.max(W,H));
+      var gw = T(new cv.Mat());
+      cv.resize(gray, gw, new cv.Size(Math.max(16,Math.round(W*ws)), Math.max(16,Math.round(H*ws))), 0, 0, cv.INTER_AREA);
+      cv.GaussianBlur(gw, gw, new cv.Size(5,5), 1.2, 1.2);
+      var Ew = T(new cv.Mat()); cv.Canny(gw, Ew, 45, 120);
+      var Ww = gw.cols, Hw = gw.rows;
+      function outlineSupport(cx,cy,a,b,ang){      // working-scale coords; fraction of the outline with an edge nearby
+        var n=60, hit=0, ca=Math.cos(ang), sa=Math.sin(ang), tol=Math.max(2, Math.round(0.08*b));
+        for(var i=0;i<n;i++){
+          var t=2*Math.PI*i/n, ex=a*Math.cos(t), ey=b*Math.sin(t);
+          var px=Math.round(cx+ex*ca-ey*sa), py=Math.round(cy+ex*sa+ey*ca), f=false;
+          for(var dy=-tol; dy<=tol && !f; dy++) for(var dx=-tol; dx<=tol; dx++){
+            var xx=px+dx, yy=py+dy;
+            if(xx>=0 && yy>=0 && xx<Ww && yy<Hw && Ew.data[yy*Ww+xx]){ f=true; break; }
+          }
+          if(f) hit++;
+        }
+        return hit/n;
+      }
+      function considerCoin(it){
         if(it.touches || it.area > W*H*0.05) return;
         if(it.cnt.data32S.length/2 < 12) return;
         var e0;
@@ -858,30 +898,56 @@
         var fill = it.area/(Math.PI*e0.a*e0.b);
         var resid = ellipseResidual(it.cnt, e0);
         if(fill<0.85 || fill>1.15 || resid>0.07) return;
-        cands.push({e:e0, resid:resid, info:it});
+        cands.push({e:e0, resid:resid, src:'mask'});
       }
-      for(var k=1;k<info.length;k++) considerCoin(info[k], false);
+      for(var k=1;k<info.length;k++) considerCoin(info[k]);
       for(var ck=0; ck<contours2.size(); ck++){
         var c2 = T(contours2.get(ck)), a2 = cv.contourArea(c2);
         if(a2 < W*H*0.0002) continue;
         var bb2 = cv.boundingRect(c2);
         var tch = bb2.x<=1 || bb2.y<=1 || bb2.x+bb2.width>=W-1 || bb2.y+bb2.height>=H-1;
-        // skip the bottle itself (same place as the GrabCut silhouette)
         var bbB2 = bottleInfo.bb, ov = Math.max(0, Math.min(bb2.x+bb2.width,bbB2.x+bbB2.width)-Math.max(bb2.x,bbB2.x)) * Math.max(0, Math.min(bb2.y+bb2.height,bbB2.y+bbB2.height)-Math.max(bb2.y,bbB2.y));
         if(ov > 0.5*bb2.width*bb2.height) continue;
-        considerCoin({idx:-1, cnt:c2, area:a2, bb:bb2, touches:tch}, true);
+        considerCoin({idx:-1, cnt:c2, area:a2, bb:bb2, touches:tch});
       }
-      if(cands.length){
-        cands.sort(function(p,q2){ return p.resid-q2.resid; });
-        coin = cands[0];
+      // Hough circles: finds a coin even when it overlaps the bottle's base (it is then
+      // merged with the bottle in the colour mask and no separate blob exists).
+      try{
+        var hc = T(new cv.Mat());
+        cv.HoughCircles(gw, hc, cv.HOUGH_GRADIENT, 1, Math.max(6, Ww*0.03), 110, 16, Math.max(6, Math.round(Ww*0.018)), Math.round(Ww*0.09));
+        for(var hi2=0; hi2<Math.min(hc.cols, 30); hi2++){
+          var hx=hc.data32F[hi2*3]/ws, hy=hc.data32F[hi2*3+1]/ws, hr=hc.data32F[hi2*3+2]/ws;
+          cands.push({e:{cx:hx, cy:hy, a:hr, b:hr, ang:0, w:hr, h:hr, rawAng:0}, resid:0.03, src:'hough'});
+        }
+      }catch(err){ /* Hough unavailable: mask candidates only */ }
+      var bbB = bottleInfo.bb, standingLike = bbB.height >= bbB.width, LB = Math.max(bbB.width, bbB.height);
+      var good = [];
+      cands.forEach(function(c){
+        var ee = c.e;
+        c.support = outlineSupport(ee.cx*ws, ee.cy*ws, ee.a*ws, ee.b*ws, ee.ang);
+        if(c.src==='mask') c.support = Math.max(c.support, 0.95-6*c.resid);   // blob contours were already validated by fill/residual
+        if(c.support < 0.72) return;
+        if(ee.a < 0.012*Math.max(W,H) || ee.a > 0.09*Math.max(W,H)) return;
+        var inside = ee.cx>bbB.x && ee.cx<bbB.x+bbB.width && ee.cy>bbB.y && ee.cy<bbB.y+bbB.height;
+        if(inside){
+          // a coin may overlap the bottle only near the bottle's foot (or end, if lying)
+          if(standingLike){ if(ee.cy < bbB.y + 0.80*bbB.height) return; }
+          else { if(!(ee.cx < bbB.x+0.2*bbB.width || ee.cx > bbB.x+0.8*bbB.width)) return; }
+        }
+        var dx0 = Math.max(bbB.x-ee.cx, 0, ee.cx-(bbB.x+bbB.width)), dy0 = Math.max(bbB.y-ee.cy, 0, ee.cy-(bbB.y+bbB.height));
+        c.score = c.support - 0.5*Math.hypot(dx0,dy0)/LB - (c.src==='hough'?0.03:0);
+        good.push(c);
+      });
+      if(good.length){
+        good.sort(function(p,q2){ return q2.score-p.score; });
+        coin = good[0];
         // concentric larger candidate = the true outer rim (bimetallic coins)
-        for(var cq=0; cq<cands.length; cq++){
-          var cc = cands[cq], ratio = cc.e.a/coin.e.a;
-          if(ratio>1.1 && ratio<2.4 && Math.hypot(cc.e.cx-coin.e.cx, cc.e.cy-coin.e.cy) < 0.25*cc.e.a) coin = cc;
+        for(var cq=0; cq<good.length; cq++){
+          var cc = good[cq], ratio = cc.e.a/coin.e.a;
+          if(ratio>1.1 && ratio<2.4 && Math.hypot(cc.e.cx-coin.e.cx, cc.e.cy-coin.e.cy) < 0.25*cc.e.a && cc.score > coin.score-0.2) coin = cc;
         }
       }
-      if(!coin){ var rf=fail('No se detectó la moneda. Debe verse completa, separada de la botella, y ocupar al menos ~5 % del ancho de la foto (acércate o usa zoom).'); if(opts.debug) rf.debug={mask:Array.from(fg.data)}; return rf; }
-      if(false) return fail('No se detectó la moneda. Debe verse completa, separada de la botella, y ocupar al menos ~5 % del ancho de la foto (acércate o usa zoom).');
+      if(!coin){ return fail('No se detectó la moneda. Debe verse completa, ocupar al menos ~4 % del ancho de la foto y estar a la misma distancia de la cámara que el envase (acércate o usa zoom).'); }
 
       // ---- 3) refine the coin ellipse at full resolution (edge pixels) ----
       var e = coin.e;
@@ -890,24 +956,63 @@
         var g2 = T(new cv.Mat());
         cv.GaussianBlur(gray, g2, new cv.Size(3,3), 0.9, 0.9);
         cv.Canny(g2, edges, 50, 130);
-        var pts = [];
-        var ca2=Math.cos(e.rawAng), sa2=Math.sin(e.rawAng);
-        var x0=Math.max(0,Math.floor(e.cx-e.a*1.4)), x1=Math.min(W-1,Math.ceil(e.cx+e.a*1.4));
-        var y0=Math.max(0,Math.floor(e.cy-e.a*1.4)), y1=Math.min(H-1,Math.ceil(e.cy+e.a*1.4));
-        for(var yy=y0;yy<=y1;yy++) for(var xx=x0;xx<=x1;xx++){
-          if(edges.data[yy*W+xx]===0) continue;
-          var dx2=xx-e.cx, dy2=yy-e.cy;
-          var xr2=dx2*ca2+dy2*sa2, yr2=-dx2*sa2+dy2*ca2;
-          var rho=Math.sqrt((xr2/e.w)*(xr2/e.w)+(yr2/e.h)*(yr2/e.h));
-          if(rho>0.88 && rho<1.12) pts.push(xx,yy);
-        }
-        if(pts.length/2 >= 20){
+        for(var rit=0; rit<2; rit++){
+          var pts = [];
+          var ca2=Math.cos(e.rawAng), sa2=Math.sin(e.rawAng);
+          var x0=Math.max(0,Math.floor(e.cx-e.a*1.4)), x1=Math.min(W-1,Math.ceil(e.cx+e.a*1.4));
+          var y0=Math.max(0,Math.floor(e.cy-e.a*1.4)), y1=Math.min(H-1,Math.ceil(e.cy+e.a*1.4));
+          var lo = rit===0 ? 0.86 : 0.92, hi = rit===0 ? 1.14 : 1.08;
+          for(var yy=y0;yy<=y1;yy++) for(var xx=x0;xx<=x1;xx++){
+            if(edges.data[yy*W+xx]===0) continue;
+            var dx2=xx-e.cx, dy2=yy-e.cy;
+            var xr2=dx2*ca2+dy2*sa2, yr2=-dx2*sa2+dy2*ca2;
+            var rho=Math.sqrt((xr2/e.w)*(xr2/e.w)+(yr2/e.h)*(yr2/e.h));
+            if(rho>lo && rho<hi) pts.push(xx,yy);
+          }
+          if(pts.length/2 < 20) break;
           var pm = T(cv.matFromArray(pts.length/2, 1, cv.CV_32SC2, pts));
           var e2 = fitEllipseInfo(null, pm);
           // Canny marks the first pixel past the edge: the fitted outline sits ~0.5 px outside the true edge.
-          if(e2.a>0 && Math.abs(e2.a-e.a)/e.a < 0.15 && e2.b/e2.a>0.2){ e2.a -= 0.5; e2.b -= 0.5; e = e2; }
+          if(e2.a>0 && Math.abs(e2.a-e.a)/e.a < 0.15 && e2.b/e2.a>0.2){ e2.a -= 0.5*(rit===1?1:0); e2.b -= 0.5*(rit===1?1:0); e = e2; } else break;
         }
-      }catch(err){ /* keep the mask-based ellipse */ }
+        if(rit===1 && false){}
+      }catch(err){ /* keep the first estimate */ }
+
+      // Does the coin overlap the bottle's silhouette (coin placed against the base)?
+      var ovCnt = 0, ovN = 72;
+      (function(){
+        var ca3=Math.cos(e.ang), sa3=Math.sin(e.ang);
+        for(var i=0;i<ovN;i++){
+          var t=2*Math.PI*i/ovN, ex=e.a*1.12*Math.cos(t), ey=e.b*1.12*Math.sin(t);
+          var px=Math.round(e.cx+ex*ca3-ey*sa3), py=Math.round(e.cy+ex*sa3+ey*ca3);
+          if(px>=0 && py>=0 && px<W && py<H && fg.data[py*W+px]) ovCnt++;
+        }
+      })();
+      var coinOverlaps = ovCnt/ovN > 0.12;
+      // Remove the coin from the silhouette mask and take the bottle again.
+      cv.ellipse(fg, new cv.Point(Math.round(e.cx), Math.round(e.cy)), new cv.Size(Math.round(e.a+3), Math.round(e.b+3)), e.ang*180/Math.PI, 0, 360, new cv.Scalar(0), -1);
+      cv.morphologyEx(fg, fg, cv.MORPH_OPEN, k5);
+      var contours3 = T(new cv.MatVector()), hier3 = T(new cv.Mat());
+      cv.findContours(fg, contours3, hier3, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+      var best3 = null, bestA3 = 0;
+      for(var c3=0;c3<contours3.size();c3++){
+        var cn3 = T(contours3.get(c3)), ar3 = cv.contourArea(cn3);
+        if(ar3>bestA3){ bestA3=ar3; best3=cn3; }
+      }
+      if(!best3 || bestA3 < W*H*0.0002) return fail('No se detectó la silueta del envase al separar la moneda.');
+      var bb3 = cv.boundingRect(best3);
+      var fragX = [], fragY = [];
+      for(var c4=0;c4<contours3.size();c4++){
+        var cn4 = T(contours3.get(c4));
+        if(cn4===best3) continue;
+        var ar4 = cv.contourArea(cn4);
+        if(ar4 < W*H*0.0008) continue;
+        var b4 = cv.boundingRect(cn4);
+        var gx = Math.max(bb3.x-(b4.x+b4.width), 0, b4.x-(bb3.x+bb3.width)), gy = Math.max(bb3.y-(b4.y+b4.height), 0, b4.y-(bb3.y+bb3.height));
+        if(Math.hypot(gx,gy) > 0.4*Math.max(bb3.width,bb3.height)) continue;
+        for(var q4=0;q4<cn4.data32S.length/2;q4++){ fragX.push(cn4.data32S[q4*2]); fragY.push(cn4.data32S[q4*2+1]); }
+      }
+      bottleInfo = {idx:-1, cnt:best3, area:bestA3, bb:bb3, touches: bb3.x<=1 || bb3.y<=1 || bb3.x+bb3.width>=W-1 || bb3.y+bb3.height>=H-1};
 
       var q = e.b/e.a;
       if(q > 0.97) q = 1;           // near-circular: ellipse orientation is just noise
@@ -939,54 +1044,134 @@
           var b = Math.min(K-1, Math.floor((Tt[p3]-tmin)/span*K));
           if(Ss[p3]<smin[b]) smin[b]=Ss[p3]; if(Ss[p3]>smax[b]) smax[b]=Ss[p3];
         }
-        // least-squares line s = alpha*t + beta through the bin mid-points
-        var sT=0,sS=0,sTT=0,sTS=0,cnt=0, lo=Math.floor(K*0.08), hi=Math.ceil(K*0.92);
-        for(var b2=lo;b2<hi;b2++){
-          if(!isFinite(smin[b2])) continue;
-          var tc = tmin+(b2+0.5)/K*span, sm=(smin[b2]+smax[b2])/2;
-          sT+=tc; sS+=sm; sTT+=tc*tc; sTS+=tc*sm; cnt++;
+        // least-squares line s = alpha*t + beta through the bin mid-points; two passes,
+        // the second one dropping bins whose mid-point is an outlier (a shadow or
+        // reflection attached to one side of the bottle).
+        var lo=Math.floor(K*0.08), hi=Math.ceil(K*0.92), alpha=0, beta=0, keep=null;
+        var widths=[]; for(var bw=lo;bw<hi;bw++) if(isFinite(smin[bw])) widths.push(smax[bw]-smin[bw]);
+        widths.sort(function(a,b){return a-b;});
+        var medW = widths.length ? widths[Math.floor(widths.length/2)] : 1;
+        // initial robust estimate: Theil-Sen (median of pairwise slopes)
+        var mt=[], ms=[];
+        for(var bq=lo;bq<hi;bq++){ if(!isFinite(smin[bq])) continue; mt.push(tmin+(bq+0.5)/K*span); ms.push((smin[bq]+smax[bq])/2); }
+        if(mt.length>=6){
+          var slopes=[];
+          for(var ia=0;ia<mt.length;ia++) for(var ib=ia+1;ib<mt.length;ib++){ if(mt[ib]-mt[ia] > span*0.15) slopes.push((ms[ib]-ms[ia])/(mt[ib]-mt[ia])); }
+          slopes.sort(function(a,b){return a-b;});
+          alpha = slopes.length ? slopes[Math.floor(slopes.length/2)] : 0;
+          var icp=[]; for(var ic=0;ic<mt.length;ic++) icp.push(ms[ic]-alpha*mt[ic]);
+          icp.sort(function(a,b){return a-b;}); beta = icp[Math.floor(icp.length/2)];
         }
-        var den = cnt*sTT - sT*sT;
-        var alpha = den ? (cnt*sTS - sT*sS)/den : 0;
-        var beta = (sS - alpha*sT)/(cnt||1);
+        for(var pass=0; pass<3; pass++){
+          var sT=0,sS=0,sTT=0,sTS=0,cnt=0;
+          for(var b2=lo;b2<hi;b2++){
+            if(!isFinite(smin[b2])) continue;
+            var tc = tmin+(b2+0.5)/K*span, sm=(smin[b2]+smax[b2])/2;
+            if(Math.abs(sm-(alpha*tc+beta)) > 0.1*medW) continue;
+            sT+=tc; sS+=sm; sTT+=tc*tc; sTS+=tc*sm; cnt++;
+          }
+          var den = cnt*sTT - sT*sT;
+          alpha = den ? (cnt*sTS - sT*sS)/den : 0;
+          beta = (sS - alpha*sT)/(cnt||1);
+        }
         prof = {tmin:tmin, tmax:tmax, smin:smin, smax:smax, span:span, ux:ux, uy:uy, vx:vx, vy:vy};
         // update axis: rotate by atan(alpha), shift centre by beta along v
         th += Math.atan(alpha);
         mx += beta*vx; my += beta*vy;
         if(Math.abs(alpha)<1e-5 && Math.abs(beta)<0.05) break;
       }
-      // final pass with converged axis (recompute binning once more)
+      // final pass with the converged axis. The profile is measured on the main
+      // silhouette plus any aligned fragments of it (e.g. a cap or clear shoulders that
+      // the segmentation separated), keeping only points inside the body's width.
       (function(){
         var ux=Math.cos(th), uy=Math.sin(th), vx=-uy, vy=ux;
-        var tmin=Infinity,tmax=-Infinity, Tt=new Float64Array(n), Ss=new Float64Array(n);
-        for(var p=0;p<n;p++){ var dx=PX[p]-mx, dy=PY[p]-my; Tt[p]=dx*ux+dy*uy; Ss[p]=dx*vx+dy*vy; if(Tt[p]<tmin)tmin=Tt[p]; if(Tt[p]>tmax)tmax=Tt[p]; }
+        var rMain = 0;
+        for(var p=0;p<n;p++){ var sv=Math.abs((PX[p]-mx)*vx+(PY[p]-my)*vy); if(sv>rMain) rMain=sv; }
+        var UXs=[], UYs=[];
+        for(var p0=0;p0<n;p0++){ UXs.push(PX[p0]); UYs.push(PY[p0]); }
+        for(var f0=0; f0<fragX.length; f0++){
+          var sf=Math.abs((fragX[f0]-mx)*vx+(fragY[f0]-my)*vy);
+          if(sf <= 1.05*rMain){ UXs.push(fragX[f0]); UYs.push(fragY[f0]); }
+        }
+        var nu = UXs.length;
+        var tmin=Infinity,tmax=-Infinity, Tt=new Float64Array(nu), Ss=new Float64Array(nu);
+        for(var p1=0;p1<nu;p1++){ var dx=UXs[p1]-mx, dy=UYs[p1]-my; Tt[p1]=dx*ux+dy*uy; Ss[p1]=dx*vx+dy*vy; if(Tt[p1]<tmin)tmin=Tt[p1]; if(Tt[p1]>tmax)tmax=Tt[p1]; }
         var smin=new Float64Array(K).fill(Infinity), smax=new Float64Array(K).fill(-Infinity), span=(tmax-tmin)||1;
-        for(var p4=0;p4<n;p4++){ var b=Math.min(K-1,Math.floor((Tt[p4]-tmin)/span*K)); if(Ss[p4]<smin[b])smin[b]=Ss[p4]; if(Ss[p4]>smax[b])smax[b]=Ss[p4]; }
-        prof = {tmin:tmin,tmax:tmax,smin:smin,smax:smax,span:span,ux:ux,uy:uy,vx:vx,vy:vy};
+        for(var p4=0;p4<nu;p4++){ var b=Math.min(K-1,Math.floor((Tt[p4]-tmin)/span*K)); if(Ss[p4]<smin[b])smin[b]=Ss[p4]; if(Ss[p4]>smax[b])smax[b]=Ss[p4]; }
+        var mainBin = new Uint8Array(K);
+        for(var p5=0;p5<n;p5++){ var bm=Math.min(K-1,Math.floor((Tt[p5]-tmin)/span*K)); mainBin[bm]=1; }
+        prof = {tmin:tmin,tmax:tmax,smin:smin,smax:smax,span:span,ux:ux,uy:uy,vx:vx,vy:vy,mainBin:mainBin};
       })();
-      var tArr=[], rArr=[];
+      // radius per bin: half the extent, but when one side is far larger than the other
+      // (a shadow or reflection stuck on one side) trust the smaller side.
+      var tArr=[], rArr=[], susArr=[];
       for(var b3=0;b3<K;b3++){
         if(!isFinite(prof.smin[b3])) continue;
+        var lo3 = Math.abs(prof.smin[b3]), hi3 = Math.abs(prof.smax[b3]);
+        var rr3 = (prof.smax[b3]-prof.smin[b3])/2;
+        var sus3 = !prof.mainBin[b3];
+        if(b3>1 && b3<K-2 && prof.smin[b3]<0 && prof.smax[b3]>0 && Math.max(lo3,hi3) > 1.5*Math.min(lo3,hi3)){ rr3 = Math.min(lo3,hi3); sus3 = true; }
         tArr.push(prof.tmin+(b3+0.5)/K*prof.span);
-        rArr.push((prof.smax[b3]-prof.smin[b3])/2);
+        rArr.push(rr3); susArr.push(sus3);
       }
+      // bins with no silhouette points (clear plastic that was not segmented): fill linearly
+      (function(){
+        var T2=[], R2=[], S2=[];
+        for(var i=0;i<tArr.length;i++){
+          if(i>0){
+            var dtp = tArr[i]-tArr[i-1], binW = prof.span/K;
+            if(dtp > 1.6*binW){
+              var nIns = Math.round(dtp/binW)-1;
+              for(var j=1;j<=nIns;j++){ var fr=j/(nIns+1); T2.push(tArr[i-1]+fr*dtp); R2.push(rArr[i-1]+fr*(rArr[i]-rArr[i-1])); S2.push(true); }
+            }
+          }
+          T2.push(tArr[i]); R2.push(rArr[i]); S2.push(susArr[i]);
+        }
+        tArr=T2; rArr=R2; susArr=S2;
+      })();
       if(tArr.length<10) return fail('No se pudo construir el perfil de la botella. Repite la foto con la botella completa en el encuadre.');
       // extend to the true extremes (flat ends)
-      tArr.unshift(prof.tmin); rArr.unshift(rArr[0]);
-      tArr.push(prof.tmax);   rArr.push(rArr[rArr.length-1]);
+      tArr.unshift(prof.tmin); rArr.unshift(rArr[0]); susArr.unshift(true);
+      tArr.push(prof.tmax);   rArr.push(rArr[rArr.length-1]); susArr.push(true);
 
       // orientation: z grows toward the NARROWER end (neck/mouth)
       var m10 = Math.max(2, Math.round(tArr.length*0.1)), wLo=0, wHi=0;
       for(var q1=0;q1<m10;q1++){ wLo+=rArr[q1]; wHi+=rArr[rArr.length-1-q1]; }
       var flip = (wHi > wLo);   // wide end is at the high-t side -> reverse so that it becomes z=0
+      var devVert0 = Math.abs(Math.abs(Math.atan2(prof.uy,prof.ux)*180/Math.PI)-90);
+      var postureEarly = (opts.posture==='standing' || opts.posture==='lying') ? opts.posture : (devVert0<25 ? 'standing' : 'lying');
+      if(postureEarly==='standing') flip = (prof.uy > 0);   // standing: z=0 is the foot (lower end in the picture), z grows upward
       var ux0=prof.ux, uy0=prof.uy;
       var tmin0=prof.tmin, tmax0=prof.tmax;
       if(flip){
         tArr = tArr.map(function(t){ return -t; }).reverse();
-        rArr = rArr.slice().reverse();
+        rArr = rArr.slice().reverse(); susArr = susArr.slice().reverse();
         ux0=-ux0; uy0=-uy0;
         var tmp=tmin0; tmin0=-tmax0; tmax0=-tmp;
       }
+      // Above the widest section a bottle's shoulders and neck are convex. Clear plastic is often
+      // only partly segmented there, so take the upper concave envelope of r(t) from the widest
+      // section to the end (it never lowers a measured radius).
+      (function(){
+        var iw=Math.floor(rArr.length/2); for(var i=iw;i<rArr.length;i++) if(rArr[i]>rArr[iw]) iw=i;   // widest section within the upper half
+        var hull=[];   // indices of the upper hull
+        for(var j=iw;j<tArr.length;j++){
+          while(hull.length>=2){
+            var a=hull[hull.length-2], b=hull[hull.length-1];
+            var cross=(tArr[b]-tArr[a])*(rArr[j]-rArr[a])-(rArr[b]-rArr[a])*(tArr[j]-tArr[a]);
+            if(cross>=0) hull.pop(); else break;
+          }
+          hull.push(j);
+        }
+        for(var h=0;h<hull.length-1;h++){
+          var a2=hull[h], b2=hull[h+1];
+          for(var k2=a2+1;k2<b2;k2++){
+            var fr=(tArr[k2]-tArr[a2])/(tArr[b2]-tArr[a2]);
+            var rv=rArr[a2]+fr*(rArr[b2]-rArr[a2]);
+            if(susArr[k2] && rv>rArr[k2]) rArr[k2]=rv;
+          }
+        }
+      })();
 
       // ---- 5) metric reconstruction with a pinhole camera model ----
       // The coin (known diameter) lies on, or stands on, the table. Its image
@@ -1123,6 +1308,7 @@
       var lenCm = rows[rows.length-1].z_cm - rows[0].z_cm, rMaxCm = 0;
       rows.forEach(function(rw){ if(rw.r_cm>rMaxCm) rMaxCm=rw.r_cm; });
       var bottleFrac = bottleInfo.area/(W*H);
+      dbgState = {posture:posture, coinPose:coinPose, pitchDeg:pitch*180/Math.PI, dbgInfo:dbgInfo, coin:{cx:e.cx,cy:e.cy,a:e.a,b:e.b,ang:e.ang}, f:f, coinOverlaps:coinOverlaps, rows0:rows.slice(0,3), rowsN:rows.slice(-3), sRange:[sMin,sMax], baseBottomYinfo:(typeof baseBottomY!=='undefined'?baseBottomY:null), axisAng:Math.atan2(uy0,ux0)*180/Math.PI, model:note3d};
       if(bottleFrac > 0.45) return fail('El envase ocupa casi toda la foto o el fondo es demasiado complejo. Aléjate un poco para que se vea completo, con la moneda al lado.');
       if(!(lenCm>8 && lenCm<46) || !(rMaxCm>1.2 && rMaxCm<8) || lenCm/(2*rMaxCm) < 1.1 || lenCm/(2*rMaxCm) > 16){
         return fail('Las medidas detectadas no son las de un envase (largo ≈ '+lenCm.toFixed(0)+' cm, radio máx. ≈ '+rMaxCm.toFixed(1)+' cm). Revisa que se haya detectado bien la moneda y la silueta (paso 2), o repite la foto con más contraste.');
