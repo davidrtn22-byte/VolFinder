@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<!--
+  Del píxel al volumen — Laboratorio de Análisis Numérico (UPB)
+  ================================================================
+  App web de una sola página (sin backend) que estima el volumen de un
+  envase a partir de UNA fotografía, modelándolo como un sólido de
+  revolución:
+
+      V = π ∫[a,b] r(z)² dz
+
+  Flujo 100% automático (requisito explícito del profesor: el usuario
+  SOLO toma la foto, el software hace todo lo demás — nada de clics
+  manuales sobre escala, eje o contorno):
+
+    (1) el usuario fotografía el envase de pie, sobre fondo mate y
+        uniforme, junto a una moneda común (circular, de diámetro
+        conocido) que sirve como referencia de escala
+     → (2) la app detecta automáticamente: la moneda (para la escala),
+        la silueta del envase y su eje de revolución
+     → (3) se construye la tabla de datos (z, r, r², f(z)=πr²)
+     → (4) se integra numéricamente con 4 métodos (trapecio, Simpson
+        1/3, Newton-Cotes 3/8, cuadratura de Gauss), TODOS programados
+        a mano — ninguna librería resuelve la interpolación ni la
+        integración, por restricción explícita del profesor
+     → (5) se comparan resultados
+     → (6) se valida contra un volumen de referencia, distinguiendo
+        explícitamente volumen geométrico calculado / capacidad
+        nominal de etiqueta / volumen experimental medido.
+
+  Por qué una moneda y no una tarjeta con marcador: sin NINGÚN objeto
+  de tamaño conocido en la foto es matemáticamente imposible recuperar
+  una escala absoluta de una sola imagen (ver el README). Una moneda
+  común, que cualquiera ya lleva encima, es la opción de menor
+  fricción que sigue cumpliendo "el usuario solo toma la fotografía".
+
+  Librería externa usada — SOLO para procesamiento de imagen (permitido
+  explícitamente por el profesor), nunca para interpolar ni integrar:
+    - OpenCV.js (bundle @opencvjs/web). Se publica junto a esta página
+      como archivo de soporte comprimido (opencv-wasm.b64gz.txt: gzip +
+      base64, por una limitación del publicador de artefactos con
+      archivos de texto binarios) y se descomprime/inyecta en el
+      navegador sin red ni CDN externo: escala de grises, desenfoque
+      gaussiano, detección de círculos de Hough (moneda), umbral de
+      Otsu, operaciones morfológicas y contornos (silueta del envase).
+  Interpolación (spline cúbico natural) y los 4 métodos de integración
+  están escritos a mano, sin llamar a ninguna función de librería que
+  resuelva esas operaciones directamente — ver función
+  naturalCubicSpline() y las 4 funciones de integración más abajo.
+
+  Estructura del archivo:
+    <style>  — tokens de color (claro/oscuro), layout, componentes
+    <body>   — cabecera, navegación de 6 pasos, paneles por paso
+    <script> (primero) — descomprime/inyecta OpenCV.js y expone window.cv
+    <script> — estado de la app, pipeline de visión por computador,
+               geometría, interpolación manual, 4 métodos de
+               integración, gráficas, validación
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Del píxel al volumen — Laboratorio de Análisis Numérico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EFEAE0;
+    --surface:#F7F4EC;
+    --surface-2:#FFFFFF;
+    --ink:#1B2430;
+    --muted:#5B6572;
+    --accent:#B4750E;
+    --accent-ink:#FFFFFF;
+    --accent-2:#12746B;
+    --line:rgba(27,36,48,0.16);
+    --danger:#B3392C;
+    --good:#2E7D4F;
+    --accent-3:#7C3AED;
+    --font-display:'Space Grotesk','Segoe UI',Helvetica,Arial,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#10161D; --surface:#161F29; --surface-2:#1C2733; --ink:#E7EAED;
+      --muted:#93A0AC; --accent:#E8A33D; --accent-ink:#10161D; --accent-2:#57C7BC;
+      --line:rgba(255,255,255,0.14); --danger:#E2665A; --good:#5FCB8B; --accent-3:#A78BFA;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#10161D; --surface:#161F29; --surface-2:#1C2733; --ink:#E7EAED;
+    --muted:#93A0AC; --accent:#E8A33D; --accent-ink:#10161D; --accent-2:#57C7BC;
+    --line:rgba(255,255,255,0.14); --danger:#E2665A; --good:#5FCB8B; --accent-3:#A78BFA;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--font-mono); font-size:14px; line-height:1.55;
+  }
+  h1,h2,h3,.disp{font-family:var(--font-display);}
+  h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-0.01em;}
+  h2{font-size:16px;font-weight:600;margin:0 0 4px 0;}
+  p{margin:0 0 10px 0;color:var(--muted);}
+  .app{max-width:1180px;margin:0 auto;padding:18px 16px 60px;}
+
+  header.top{
+    display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:18px;
+  }
+  header.top .brand{display:flex;flex-direction:column;gap:2px;}
+  header.top .tag{font-size:12px;color:var(--muted);}
+  .readout{
+    font-family:var(--font-mono); font-size:12px; color:var(--muted);
+    border:1px solid var(--line); padding:5px 10px; border-radius:3px; white-space:nowrap;
+  }
+
+  .layout{display:grid; grid-template-columns:210px 1fr; gap:22px; align-items:start;}
+  @media (max-width:820px){ .layout{grid-template-columns:1fr;} }
+
+  nav.steps{
+    display:flex; flex-direction:column; gap:2px; position:sticky; top:14px;
+    border:1px solid var(--line); border-radius:4px; overflow:hidden; background:var(--surface);
+  }
+  @media (max-width:820px){
+    nav.steps{flex-direction:row; overflow-x:auto; position:static; -webkit-overflow-scrolling:touch;}
+  }
+  nav.steps button{
+    all:unset; cursor:pointer; padding:11px 14px; display:flex; gap:10px; align-items:center;
+    border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:12.5px; color:var(--muted);
+  }
+  @media (max-width:820px){ nav.steps button{border-bottom:none; border-right:1px solid var(--line); flex:0 0 auto;} }
+  nav.steps button:last-child{border-bottom:none;}
+  nav.steps button .n{
+    font-family:var(--font-mono); font-size:11px; width:20px; height:20px; border-radius:50%;
+    border:1px solid var(--line); display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+  }
+  nav.steps button.active{color:var(--ink); background:var(--surface-2);}
+  nav.steps button.active .n{border-color:var(--accent); color:var(--accent);}
+  nav.steps button.done .n{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+
+  main{min-width:0;}
+  .panel{display:none; border:1px solid var(--line); border-radius:4px; background:var(--surface); padding:18px;}
+  .panel.active{display:block;}
+
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;}
+  .col{display:flex; flex-direction:column; gap:6px;}
+
+  button.btn{
+    font-family:var(--font-mono); font-size:12.5px; cursor:pointer;
+    padding:8px 13px; border-radius:3px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--ink);
+  }
+  button.btn:hover{border-color:var(--accent);}
+  button.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600;}
+  button.btn:disabled{opacity:0.4; cursor:not-allowed;}
+  input[type=text], input[type=number], select{
+    font-family:var(--font-mono); font-size:13px; padding:7px 9px; border-radius:3px;
+    border:1px solid var(--line); background:var(--surface-2); color:var(--ink); width:150px;
+  }
+  label.small{font-size:11.5px; color:var(--muted); display:block; margin-bottom:3px;}
+
+  .canvas-wrap{
+    border:1px solid var(--line); border-radius:4px; overflow:auto; max-width:100%;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:24px 24px; background-color:var(--surface-2);
+    display:flex; align-items:center; justify-content:center; min-height:240px;
+  }
+  #stage{max-width:100%; height:auto; display:block;}
+  .placeholder{color:var(--muted); font-size:12.5px; padding:40px 20px; text-align:center;}
+
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-top:8px;}
+  .legend span{display:inline-flex; align-items:center; gap:6px;}
+  .sw{width:14px; height:3px; display:inline-block; border-radius:2px;}
+  .sw.dot{width:10px;height:10px;border-radius:50%;}
+
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  thead th{
+    text-align:right; font-weight:600; color:var(--muted); font-size:11px;
+    border-bottom:1px solid var(--line); padding:6px 8px;
+  }
+  thead th:first-child, tbody td:first-child{text-align:left;}
+  tbody td{padding:6px 8px; text-align:right; border-bottom:1px solid var(--line);}
+  .table-wrap{overflow-x:auto; max-width:100%;}
+
+  .note{
+    border-left:2px solid var(--accent); background:var(--surface-2); padding:9px 12px;
+    font-size:12.5px; color:var(--muted); border-radius:0 3px 3px 0; margin:10px 0;
+  }
+  .warn{border-left-color:var(--danger); color:var(--danger);}
+  .ok{border-left-color:var(--good); color:var(--good);}
+
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  @media (max-width:720px){ .grid2{grid-template-columns:1fr;} }
+
+  canvas.chart{width:100%; height:auto; border:1px solid var(--line); border-radius:4px; background:var(--surface-2);}
+
+  .panel-title{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; gap:10px; flex-wrap:wrap;}
+  .stepnav{display:flex; justify-content:space-between; margin-top:18px; padding-top:14px; border-top:1px solid var(--line);}
+
+  footer.foot{margin-top:24px; font-size:12px; color:var(--muted); border-top:1px solid var(--line); padding-top:12px;}
+
+  details.adv{border:1px solid var(--line); border-radius:4px; margin-top:12px; background:var(--surface-2);}
+  details.adv summary{cursor:pointer; padding:9px 12px; font-size:12.5px; color:var(--muted);}
+  details.adv .inner{padding:4px 12px 12px;}
+
+  .badge{display:inline-block; font-size:11px; padding:2px 7px; border-radius:10px; border:1px solid var(--line); color:var(--muted);}
+  .badge.ok{border-color:var(--good); color:var(--good);}
+  .badge.warn{border-color:var(--danger); color:var(--danger);}
+  .spinner{display:inline-block; width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:-2px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<!--
+  Carga de OpenCV.js, EMPAQUETADO localmente (sin CDN externo, para que
+  la demo no dependa de una red disponible al abrir el enlace). El
+  archivo de soporte publicado junto a esta página es
+  "opencv-wasm.b64gz.txt": el binario original (WASM + JS de OpenCV.js,
+  ~13 MB) comprimido con gzip y luego codificado en base64, porque el
+  publicador de artefactos solo acepta texto plano en los archivos de
+  soporte. Aquí se hace el camino inverso (base64 -> bytes -> gunzip
+  con DecompressionStream, soportado nativamente por el navegador) y
+  el JS resultante se inyecta como una etiqueta <script> clásica (no un
+  módulo ES), para máxima compatibilidad entre navegadores de celular.
+  Expone window.cv y dispara el evento "opencv-ready" cuando la parte
+  WASM termina de inicializar; el script principal (más abajo, un IIFE
+  clásico, no un módulo) espera ese evento antes de habilitar el
+  análisis automático de fotos.
+-->
+<script>
+(async function(){
+  try{
+    var resp = await fetch('./opencv-wasm.b64gz.txt');
+    if(!resp.ok) throw new Error('No se pudo cargar opencv-wasm.b64gz.txt (HTTP '+resp.status+')');
+    var b64 = await resp.text();
+    var bytes = Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); });
+    var ds = new DecompressionStream('gzip');
+    var stream = new Blob([bytes]).stream().pipeThrough(ds);
+    var jsText = await new Response(stream).text();
+    var scriptEl = document.createElement('script');
+    scriptEl.textContent = jsText;
+    document.head.appendChild(scriptEl);
+    if(typeof self.__cvFactory !== 'function'){
+      throw new Error('opencv_js.js se cargó pero no definió self.__cvFactory');
+    }
+    var cv = await self.__cvFactory();
+    window.cv = cv;
+    window.__cvLoaded = true;
+    document.dispatchEvent(new CustomEvent('opencv-ready'));
+  }catch(err){
+    window.__cvError = err;
+    console.error('Error cargando OpenCV.js:', err);
+    document.dispatchEvent(new CustomEvent('opencv-error', {detail:err}));
+  }
+})();
+</script>
+
+<div class="app">
+
+  <header class="top">
+    <div class="brand">
+      <h1>Del píxel al volumen</h1>
+    </div>
+    <div class="readout" id="globalReadout">sin imagen cargada</div>
+  </header>
+
+  <div class="layout">
+    <nav class="steps" id="stepsNav">
+      <button data-step="1" class="active"><span class="n">1</span> Captura</button>
+      <button data-step="2"><span class="n">2</span> Detección automática</button>
+      <button data-step="3"><span class="n">3</span> Datos del perfil</button>
+      <button data-step="4"><span class="n">4</span> Integración</button>
+      <button data-step="5"><span class="n">5</span> Resultados</button>
+      <button data-step="6"><span class="n">6</span> Validación</button>
+    </nav>
+
+    <main>
+
+      <!-- STEP 1 — CAPTURA -->
+      <section class="panel active" data-step="1">
+        <div class="panel-title">
+          <h2>1 · Captura</h2>
+          <span class="readout" id="cvStatus"><span class="spinner"></span> cargando visión por computador…</span>
+        </div>
+        <div class="note">
+          <strong>Protocolo de captura (para que la detección automática funcione bien):</strong>
+          envase de pie, completo en el encuadre, sobre un fondo mate y uniforme con buen contraste. Una <strong>moneda común, circular</strong> (nada de bordes festoneados o poligonales) apoyada junto al envase, sin tocarlo ni superponerse, en el mismo plano de profundidad aproximado. Buena iluminación, sin reflejos fuertes. Cámara lo más frontal posible.
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label class="small">Diámetro real de la moneda (mm)</label>
+            <input type="number" id="coinDiameterMm" value="23" step="0.1" min="5">
+          </div>
+          <div class="col" style="max-width:420px;">
+            <label class="small">&nbsp;</label>
+            <div class="note" style="margin:0;">Mide tu moneda una sola vez con una regla o calibrador — no confíes en el valor nominal de catálogo. Esto se configura una vez, no por cada foto.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="btn">
+            Subir imagen
+            <input type="file" accept="image/*" id="fileUpload" style="display:none;">
+          </label>
+          <label class="btn">
+            Tomar foto
+            <input type="file" accept="image/*" capture="environment" id="fileCamera" style="display:none;">
+          </label>
+          <button class="btn" id="btnResetAll">Reiniciar todo</button>
+        </div>
+
+        <div class="canvas-wrap" id="canvasWrap">
+          <div class="placeholder" id="placeholder">La imagen aparecerá aquí. Usa "Subir imagen" o "Tomar foto" para comenzar.</div>
+          <canvas id="stage" style="display:none;"></canvas>
+        </div>
+
+        <div class="note" id="step1Note">Sube o toma una foto para comenzar.</div>
+
+        <div class="stepnav">
+          <span></span>
+          <button class="btn primary" id="btnAnalyze" disabled>Analizar foto automáticamente →</button>
+        </div>
+      </section>
+
+      <!-- STEP 2 — DETECCIÓN AUTOMÁTICA -->
+      <section class="panel" data-step="2">
+        <div class="panel-title">
+          <h2>2 · Detección automática</h2>
+          <button class="btn" id="btnReanalyze">Reprocesar</button>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap2">
+          <div class="placeholder" id="placeholder2">Vuelve al paso 1 y analiza una foto.</div>
+        </div>
+
+        <div class="legend">
+          <span><span class="sw dot" style="background:var(--accent-2)"></span>Moneda detectada (escala)</span>
+          <span><span class="sw dot" style="background:var(--danger)"></span>Contorno del envase</span>
+          <span><span class="sw" style="background:var(--accent)"></span>Eje de revolución estimado</span>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div class="col"><label class="small">Escala detectada</label><div class="readout" id="scaleReadout">—</div></div>
+          <div class="col"><label class="small">Puntos de perfil</label><div class="readout" id="pointCountReadout">0</div></div>
+          <div class="col"><label class="small">Inclinación del eje</label><div class="readout" id="axisTiltReadout">—</div></div>
+        </div>
+
+        <div class="note" id="step2Note">Analiza una foto en el paso 1.</div>
+
+        <details class="adv">
+          <summary>Ajustes avanzados de detección (afinar sin repetir la foto)</summary>
+          <div class="inner">
+            <div class="row">
+              <div class="col">
+                <label class="small">Sensibilidad de detección de moneda: <span id="houghSensVal">25</span></label>
+                <input type="range" id="houghSens" min="12" max="60" value="25" style="width:220px;">
+              </div>
+              <div class="col">
+                <label class="small">Ajuste de umbral de contorno: <span id="threshBiasVal">0</span></label>
+                <input type="range" id="threshBias" min="-60" max="60" value="0" style="width:220px;">
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="stepnav">
+          <button class="btn" data-goto="1">← Captura</button>
+          <button class="btn primary" id="toStep3">Ir a datos del perfil →</button>
+        </div>
+      </section>
+
+      <!-- STEP 3 -->
+      <section class="panel" data-step="3">
+        <div class="panel-title">
+          <h2>3 · Datos del perfil</h2>
+          <button class="btn" id="btnCopyTable">Copiar tabla</button>
+        </div>
+        <p>Puntos ordenados por posición sobre el eje (z), con radio (r) medido perpendicularmente al eje, ya convertidos a centímetros. f(z) = π·r² es el integrando cuyo volumen se estima en el paso 4.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>i</th><th>z (cm)</th><th>r (cm)</th><th>r² (cm²)</th><th>f(z)=πr² (cm²)</th></tr></thead>
+            <tbody id="profileBody"><tr><td colspan="5" style="text-align:center;color:var(--muted)">Aún no hay datos. Analiza una foto en el paso 1.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="stepnav">
+          <button class="btn" data-goto="2">← Detección automática</button>
+          <button class="btn primary" id="toStep4">Ir a integración →</button>
+        </div>
+      </section>
+
+      <!-- STEP 4 -->
+      <section class="panel" data-step="4">
+        <div class="panel-title"><h2>4 · Integración numérica</h2></div>
+        <div class="row">
+          <div class="col"><label class="small">a — inicio (cm)</label><div class="readout" id="autoA">—</div></div>
+          <div class="col"><label class="small">b — fin (cm)</label><div class="readout" id="autoB">—</div></div>
+          <div class="col"><label class="small">n (trapecio / Simpson / N-C)</label><div class="readout" id="autoN">—</div></div>
+          <div class="col"><label class="small">Gauss (orden · subintervalos)</label><div class="readout" id="autoG">—</div></div>
+        </div>
+
+        <div class="note" id="step4Note"></div>
+
+        <div class="stepnav">
+          <button class="btn" data-goto="3">← Datos del perfil</button>
+          <button class="btn primary" id="toStep5">Ir a resultados →</button>
+        </div>
+      </section>
+
+      <!-- STEP 5 -->
+      <section class="panel" data-step="5">
+        <div class="panel-title"><h2>5 · Resultados</h2></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Parámetros</th><th>Δz (cm)</th><th>∫f dz</th><th>Volumen (cm³ = mL)</th></tr></thead>
+            <tbody id="resultsBody"><tr><td colspan="5" style="text-align:center;color:var(--muted)">Analiza una foto en el paso 1.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="grid2" style="margin-top:16px;">
+          <div>
+            <h2 style="font-size:13px;">Perfil r(z) detectado</h2>
+            <canvas class="chart" id="profileChart" width="560" height="280"></canvas>
+          </div>
+          <div>
+            <h2 style="font-size:13px;">Volumen por método</h2>
+            <canvas class="chart" id="volumeChart" width="560" height="280"></canvas>
+          </div>
+        </div>
+        <div class="stepnav">
+          <button class="btn" data-goto="4">← Integración</button>
+          <button class="btn primary" id="toStep6">Ir a validación →</button>
+        </div>
+      </section>
+
+      <!-- STEP 6 -->
+      <section class="panel" data-step="6">
+        <div class="panel-title"><h2>6 · Validación y comparación</h2></div>
+        <p>Tres cantidades distintas que <strong>no deben confundirse</strong>: el volumen geométrico que calcula el modelo (la silueta exterior), la capacidad nominal de la etiqueta (un dato comercial, no necesariamente exacto) y el volumen experimental real (llenando el envase hasta el borde de la boca y midiendo con un instrumento graduado). El error se calcula contra el <strong>experimental</strong>, nunca contra el nominal.</p>
+
+        <div class="row">
+          <div class="col">
+            <label class="small">Capacidad nominal de etiqueta (mL) — solo referencia</label>
+            <input type="number" id="nominalVolume" step="0.1">
+          </div>
+          <div class="col">
+            <label class="small">Volumen experimental (mL, llenado hasta el borde)</label>
+            <input type="number" id="refVolume" step="0.1">
+          </div>
+          <button class="btn primary" id="btnValidate">Comparar</button>
+        </div>
+        <div class="note" id="nominalNote" style="display:none;"></div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Volumen geométrico (cm³)</th><th>Error abs. vs. experimental (cm³)</th><th>Error relativo (%)</th></tr></thead>
+            <tbody id="validationBody"><tr><td colspan="4" style="text-align:center;color:var(--muted)">Ingresa el volumen experimental y presiona "Comparar".</td></tr></tbody>
+          </table>
+        </div>
+        <div class="note">Si el error no baja del 5 %, discute en el informe si proviene del método numérico, la escala (moneda), la extracción automática del contorno, la discretización, la perspectiva de la foto, o la diferencia real entre volumen exterior e interior (grosor de paredes).</div>
+        <div class="stepnav">
+          <button class="btn" data-goto="5">← Resultados</button>
+          <span></span>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- state ----------
+  var state = {
+    step: 1,
+    imageLoaded: false,
+    imgW: 0, imgH: 0,
+    coinDiameterMm: 23,
+    houghSens: 25,     // maps to HoughCircles param2 (lower = more permissive)
+    threshBias: 0,     // offset applied on top of Otsu's automatic threshold
+    detection: null,   // {ok, message, coin:{cx,cy,rPx}, pxPerCm, axis:{P0,dir}, contourPointsPx:[...]}
+    profile: null,     // {zArr, rArr, splineFn}
+    results: null       // array of {name, params, dz, integral}
+  };
+
+  var canvas = document.getElementById('stage');
+  var ctx = canvas.getContext('2d');
+  var baseImage = null;
+  // Clean offscreen copy of just the photo (no overlay drawn on it) — the
+  // only thing OpenCV.js ever reads pixels from.
+  var imgCanvas = document.createElement('canvas');
+  var imgCtx = imgCanvas.getContext('2d');
+  // Second canvas (step 2) shows the photo WITH the auto-detection overlay.
+  var overlayCanvas = document.createElement('canvas');
+  overlayCanvas.id = 'stage2';
+  overlayCanvas.style.maxWidth = '100%';
+  overlayCanvas.style.height = 'auto';
+  overlayCanvas.style.display = 'block';
+  var overlayCtx = overlayCanvas.getContext('2d');
+
+  function setBaseImage(image, w, h){
+    baseImage = image;
+    state.imgW = w; state.imgH = h;
+    canvas.width = w; canvas.height = h;
+    imgCanvas.width = w; imgCanvas.height = h;
+    imgCtx.clearRect(0,0,w,h);
+    imgCtx.drawImage(image, 0, 0, w, h);
+    ctx.clearRect(0,0,w,h);
+    ctx.drawImage(image, 0, 0, w, h);
+  }
+
+  function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  // ---------- OpenCV.js readiness ----------
+  var cvReady = false;
+  function whenCvReady(cb){
+    if(cvReady && window.cv){ cb(); return; }
+    document.addEventListener('opencv-ready', function once(){
+      document.removeEventListener('opencv-ready', once);
+      cvReady = true; cb();
+    });
+  }
+  document.addEventListener('opencv-ready', function(){
+    cvReady = true;
+    document.getElementById('cvStatus').innerHTML = '<span class="badge ok">visión por computador lista</span>';
+    updateAnalyzeButton();
+  });
+  document.addEventListener('opencv-error', function(){
+    document.getElementById('cvStatus').innerHTML = '<span class="badge warn">no se pudo cargar OpenCV.js</span>';
+  });
+
+  // ---------- persistence (per-viewer convenience only) ----------
+  function saveLocal(){
+    try{
+      localStorage.setItem('retroenvases_state', JSON.stringify({
+        coinDiameterMm: state.coinDiameterMm, imgW: state.imgW, imgH: state.imgH
+      }));
+      if(baseImage){ localStorage.setItem('retroenvases_img', canvas.toDataURL('image/jpeg', 0.9)); }
+    }catch(e){ /* storage unavailable or full — ignore, not critical */ }
+  }
+  function loadLocal(){
+    try{
+      var raw = localStorage.getItem('retroenvases_state');
+      if(!raw) return;
+      var data = JSON.parse(raw);
+      if(typeof data.coinDiameterMm === 'number'){
+        state.coinDiameterMm = data.coinDiameterMm;
+        document.getElementById('coinDiameterMm').value = data.coinDiameterMm;
+      }
+      var img = localStorage.getItem('retroenvases_img');
+      if(img){
+        var image = new Image();
+        image.onload = function(){
+          setBaseImage(image, data.imgW, data.imgH);
+          state.imageLoaded = true;
+          showCanvas();
+          updateAnalyzeButton();
+        };
+        image.src = img;
+      }
+    }catch(e){ /* ignore */ }
+  }
+
+  // ---------- image loading ----------
+  function handleFile(file){
+    if(!file) return;
+    var note = document.getElementById('step1Note');
+    var nameLower = (file.name||'').toLowerCase();
+    var isHeic = nameLower.endsWith('.heic') || nameLower.endsWith('.heif') || file.type==='image/heic' || file.type==='image/heif';
+    if(isHeic){
+      note.className='note warn';
+      note.textContent = 'Este archivo es HEIC/HEIF (formato típico de cámara de iPhone) y el navegador no puede abrirlo directamente. Cambia Ajustes → Cámara → Formatos a "Más compatible" (para que guarde en JPG), o convierte la foto antes de subirla, y vuelve a intentar.';
+      return;
+    }
+    var reader = new FileReader();
+    reader.onerror = function(){
+      note.className='note warn';
+      note.textContent = 'No se pudo leer el archivo desde el dispositivo. Prueba con otra foto.';
+    };
+    reader.onload = function(ev){
+      var image = new Image();
+      image.onerror = function(){
+        note.className='note warn';
+        note.textContent = 'El navegador no pudo abrir esta imagen (formato no compatible). Prueba con una foto en JPG o PNG.';
+      };
+      image.onload = function(){
+        var maxW = 900;
+        var scale = image.width > maxW ? maxW/image.width : 1;
+        var w = Math.round(image.width*scale), h = Math.round(image.height*scale);
+        setBaseImage(image, w, h);
+        state.imageLoaded = true;
+        state.detection = null; state.profile = null; state.results = null;
+        showCanvas();
+        note.className='note ok';
+        note.textContent = 'Foto cargada. Presiona "Analizar foto automáticamente" para continuar.';
+        updateAnalyzeButton();
+        saveLocal();
+      };
+      image.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  document.getElementById('fileUpload').addEventListener('change', function(e){ handleFile(e.target.files[0]); });
+  document.getElementById('fileCamera').addEventListener('change', function(e){ handleFile(e.target.files[0]); });
+
+  function showCanvas(){
+    document.getElementById('placeholder').style.display = 'none';
+    canvas.style.display = 'block';
+  }
+
+  document.getElementById('coinDiameterMm').addEventListener('input', function(e){
+    state.coinDiameterMm = parseFloat(e.target.value)||23;
+    saveLocal();
+  });
+  document.getElementById('houghSens').addEventListener('input', function(e){
+    state.houghSens = parseInt(e.target.value);
+    document.getElementById('houghSensVal').textContent = state.houghSens;
+  });
+  document.getElementById('threshBias').addEventListener('input', function(e){
+    state.threshBias = parseInt(e.target.value);
+    document.getElementById('threshBiasVal').textContent = state.threshBias;
+  });
+
+  document.getElementById('btnResetAll').addEventListener('click', function(){
+    state.imageLoaded=false; baseImage=null; state.detection=null; state.profile=null; state.results=null;
+    canvas.style.display='none';
+    document.getElementById('placeholder').style.display='block';
+    document.getElementById('placeholder2').style.display='block';
+    if(overlayCanvas.parentNode) overlayCanvas.style.display='none';
+    try{ localStorage.removeItem('retroenvases_state'); localStorage.removeItem('retroenvases_img'); }catch(e){}
+    updateAnalyzeButton();
+    renderProfileTable();
+    renderResults();
+  });
+
+  function updateAnalyzeButton(){
+    document.getElementById('btnAnalyze').disabled = !(state.imageLoaded && cvReady);
+  }
+
+  // ---------- geometry (shared with the automatic pipeline below) ----------
+  // Projects point P onto the axis line A->B (both in pixels):
+  //   z = signed distance from A along the axis direction (A = base, B = top)
+  //   r = perpendicular distance from P to the axis line
+  function projectOnAxis(P, A, B){
+    var ABx=B.x-A.x, ABy=B.y-A.y;
+    var ABlen = Math.hypot(ABx,ABy) || 1e-9;
+    var APx=P.x-A.x, APy=P.y-A.y;
+    var t = (APx*ABx+APy*ABy)/(ABlen*ABlen);
+    var z = t*ABlen;
+    var cross = APx*ABy - APy*ABx;
+    var r = Math.abs(cross)/ABlen;
+    return {z:z, r:r};
+  }
+
+  // ---------- automatic detection pipeline (OpenCV.js: image processing
+  // only — grayscale, blur, Hough circles, Otsu threshold, morphology,
+  // contours. No library here does interpolation or integration.) ----------
+  function runAutoDetection(){
+    var note = document.getElementById('step2Note');
+    if(!state.imageLoaded){ note.className='note warn'; note.textContent='Sube o toma una foto primero.'; return; }
+    if(!window.cv){ note.className='note warn'; note.textContent='OpenCV.js todavía no está listo.'; return; }
+
+    var cv = window.cv;
+    var mats = []; // track every cv.Mat/MatVector we create, for cleanup
+    function track(m){ mats.push(m); return m; }
+
+    try{
+      var src = track(cv.imread(imgCanvas));              // RGBA
+      var gray = track(new cv.Mat());
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      var blurred = track(new cv.Mat());
+      cv.GaussianBlur(gray, blurred, new cv.Size(5,5), 1.4, 1.4);
+
+      var minDim = Math.min(state.imgW, state.imgH);
+
+      // --- 1) coin detection: Hough circle transform ---
+      var circles = track(new cv.Mat());
+      var param2 = state.houghSens; // lower = more permissive / more false positives
+      cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1,
+        Math.max(20, minDim*0.08),      // minDist between circle centers
+        100,                             // Canny high threshold (param1)
+        param2,
+        Math.round(minDim*0.01)+4,      // minRadius
+        Math.round(minDim*0.16));       // maxRadius
+
+      var coin = null;
+      if(circles.cols > 0){
+        // Pick the strongest candidate (HOUGH_GRADIENT returns candidates in
+        // roughly decreasing accumulator-vote order).
+        coin = { cx: circles.data32F[0], cy: circles.data32F[1], rPx: circles.data32F[2] };
+      }
+
+      // --- 2) bottle silhouette: Otsu threshold + morphology + contours ---
+      // Try "object darker than background" first (matches the documented
+      // protocol: fondo mate claro). If the resulting foreground covers an
+      // implausibly large fraction of the frame, the polarity is probably
+      // backwards (light object on dark background) — flip and retry once.
+      function segment(inverted){
+        var bin = new cv.Mat();
+        cv.threshold(blurred, bin, 0, 255,
+          (inverted ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY) + cv.THRESH_OTSU);
+        if(state.threshBias){
+          // crude manual bias: grow/shrink the mask with extra morphology
+          var biasKernelSize = Math.max(1, Math.round(Math.abs(state.threshBias)/12));
+          var bk = cv.Mat.ones(biasKernelSize, biasKernelSize, cv.CV_8U);
+          if(state.threshBias>0) cv.dilate(bin, bin, bk); else cv.erode(bin, bin, bk);
+          bk.delete();
+        }
+        var kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
+        cv.morphologyEx(bin, bin, cv.MORPH_CLOSE, kernel);
+        cv.morphologyEx(bin, bin, cv.MORPH_OPEN, kernel);
+        kernel.delete();
+        return bin;
+      }
+      var bin = segment(true);
+      var totalArea = state.imgW*state.imgH;
+      function foregroundFraction(binMat){
+        var contours = new cv.MatVector(), hier = new cv.Mat();
+        cv.findContours(binMat, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+        var sum=0;
+        for(var i=0;i<contours.size();i++) sum += cv.contourArea(contours.get(i));
+        contours.delete(); hier.delete();
+        return sum/totalArea;
+      }
+      var frac = foregroundFraction(bin);
+      if(frac > 0.6){
+        bin.delete();
+        bin = segment(false);
+      }
+      track(bin);
+
+      var contours = track(new cv.MatVector());
+      var hierarchy = track(new cv.Mat());
+      cv.findContours(bin, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+
+      if(contours.size()===0){
+        note.className='note warn';
+        note.textContent='No se detectó ningún objeto contra el fondo. Verifica que el fondo sea uniforme y contraste con el envase, con buena iluminación, y vuelve a tomar la foto.';
+        state.detection = {ok:false};
+        renderDetectionResult();
+        return;
+      }
+
+      // Exclude the coin's own contour (bounding circle matches the detected
+      // Hough circle) before picking "the largest contour" as the bottle.
+      function isCoinContour(idx){
+        if(!coin) return false;
+        var mc = cv.minEnclosingCircle(contours.get(idx));
+        var dx = mc.center.x-coin.cx, dy = mc.center.y-coin.cy;
+        var centerDist = Math.hypot(dx,dy);
+        var radiusRatio = mc.radius/coin.rPx;
+        return centerDist < coin.rPx*1.6 && radiusRatio>0.5 && radiusRatio<1.8;
+      }
+      var minBottleArea = totalArea*0.004;
+      var bottleIdx=-1, bottleArea=-1;
+      for(var i=0;i<contours.size();i++){
+        if(isCoinContour(i)) continue;
+        var area = cv.contourArea(contours.get(i));
+        if(area<minBottleArea) continue;
+        if(area>bottleArea){ bottleArea=area; bottleIdx=i; }
+      }
+      if(bottleIdx===-1){
+        note.className='note warn';
+        note.textContent='Se detectó la moneda pero no una silueta de envase suficientemente grande. Verifica que el envase esté completo en el encuadre y repite la foto.';
+        state.detection = {ok:false};
+        renderDetectionResult();
+        return;
+      }
+      if(!coin){
+        note.className='note warn';
+        note.textContent='No se detectó la moneda de referencia. Revisa que sea circular, esté bien iluminada, separada del envase, y no sea demasiado pequeña ni grande en el encuadre. Puedes subir la "sensibilidad de detección de moneda" abajo y reprocesar.';
+        state.detection = {ok:false};
+        renderDetectionResult();
+        return;
+      }
+
+      var bottleBox = cv.boundingRect(contours.get(bottleIdx));
+      // Warn (but still proceed) if the silhouette touches the image border —
+      // likely means the bottle was cropped out of the frame.
+      var touchesBorder = bottleBox.x<=1 || bottleBox.y<=1 ||
+        (bottleBox.x+bottleBox.width)>=state.imgW-1 || (bottleBox.y+bottleBox.height)>=state.imgH-1;
+
+      // --- 3) per-row left/right edge extraction from the bottle contour ---
+      var c = contours.get(bottleIdx);
+      var n = c.data32S.length/2;
+      var rows = new Map();
+      for(var p=0;p<n;p++){
+        var x = c.data32S[p*2], y = c.data32S[p*2+1];
+        var e = rows.get(y);
+        if(!e) rows.set(y, {minX:x, maxX:x});
+        else { if(x<e.minX) e.minX=x; if(x>e.maxX) e.maxX=x; }
+      }
+      var ys = Array.from(rows.keys()).sort(function(a,b){return a-b;});
+      if(ys.length < 4){
+        note.className='note warn'; note.textContent='El contorno detectado es demasiado pequeño o delgado para construir un perfil. Repite la foto con el envase más grande en el encuadre.';
+        state.detection = {ok:false};
+        renderDetectionResult();
+        return;
+      }
+
+      // --- 4) axis fit: least squares, x = m*y + c (hand-coded, no library) ---
+      var sy=0, sx=0, syy=0, sxy=0, cnt=0;
+      ys.forEach(function(y){
+        var e=rows.get(y); var mid=(e.minX+e.maxX)/2;
+        sy+=y; sx+=mid; syy+=y*y; sxy+=y*mid; cnt++;
+      });
+      var denom = (cnt*syy - sy*sy) || 1e-9;
+      var m = (cnt*sxy - sy*sx) / denom;
+      var c0 = (sx - m*sy)/cnt;
+      // A: base of the bottle (largest y in image = lowest on screen),
+      // B: top/mouth (smallest y) — so z grows from base to mouth, as required.
+      var yBase = ys[ys.length-1], yTop = ys[0];
+      var A = { x: m*yBase+c0, y: yBase };
+      var B = { x: m*yTop+c0,  y: yTop  };
+
+      // --- 5) build synthetic "contour points" (both edges, every ~N rows)
+      // and reuse the exact same projectOnAxis() used throughout the app.
+      var targetRows = 80;
+      var step = Math.max(1, Math.floor(ys.length/targetRows));
+      var contourPointsPx = [];
+      for(var k=0;k<ys.length;k+=step){
+        var y2=ys[k], e2=rows.get(y2);
+        contourPointsPx.push({x:e2.minX, y:y2});
+        contourPointsPx.push({x:e2.maxX, y:y2});
+      }
+
+      var pxPerCm = (2*coin.rPx) / (state.coinDiameterMm/10);
+      var tiltDeg = Math.atan(m) * 180/Math.PI;
+
+      state.detection = {
+        ok: true,
+        coin: coin,
+        pxPerCm: pxPerCm,
+        axis: {A:A, B:B},
+        contourPointsPx: contourPointsPx,
+        tiltDeg: tiltDeg,
+        touchesBorder: touchesBorder
+      };
+
+      note.className = touchesBorder ? 'note warn' : 'note ok';
+      note.textContent = touchesBorder ?
+        'Detección completada, pero el contorno toca el borde de la imagen — es posible que el envase esté cortado. Revisa la vista abajo.' :
+        'Detección automática completada. Revisa la vista abajo antes de continuar.';
+
+      buildProfileFromDetection();
+      renderDetectionResult();
+      saveLocal();
+
+    } catch(err){
+      note.className='note warn';
+      note.textContent = 'Error durante el procesamiento automático: ' + (err && err.message ? err.message : err) + '. Intenta con otra foto.';
+      state.detection = {ok:false};
+      renderDetectionResult();
+    } finally {
+      mats.forEach(function(m){ try{ m.delete(); }catch(e){} });
+    }
+  }
+
+  function renderDetectionResult(){
+    var wrap = document.getElementById('canvasWrap2');
+    var ph = document.getElementById('placeholder2');
+    var det = state.detection;
+    document.getElementById('pointCountReadout').textContent = (state.profile ? state.profile.zArr.length : 0);
+    if(!det || !det.ok){
+      document.getElementById('scaleReadout').textContent = '—';
+      document.getElementById('axisTiltReadout').textContent = '—';
+      return;
+    }
+    if(!overlayCanvas.parentNode){ wrap.appendChild(overlayCanvas); }
+    ph.style.display='none';
+    overlayCanvas.style.display='block';
+    overlayCanvas.width = state.imgW; overlayCanvas.height = state.imgH;
+    overlayCtx.clearRect(0,0,state.imgW,state.imgH);
+    overlayCtx.drawImage(baseImage, 0,0, state.imgW, state.imgH);
+
+    // coin circle
+    overlayCtx.strokeStyle = cssVar('--accent-2'); overlayCtx.lineWidth = 3;
+    overlayCtx.beginPath(); overlayCtx.arc(det.coin.cx, det.coin.cy, det.coin.rPx, 0, Math.PI*2); overlayCtx.stroke();
+
+    // bottle contour points
+    overlayCtx.fillStyle = cssVar('--danger');
+    det.contourPointsPx.forEach(function(p){ overlayCtx.beginPath(); overlayCtx.arc(p.x,p.y,3,0,Math.PI*2); overlayCtx.fill(); });
+
+    // axis line (extended slightly beyond A/B for visibility)
+    var A=det.axis.A, B=det.axis.B;
+    overlayCtx.strokeStyle = cssVar('--accent'); overlayCtx.lineWidth = 2;
+    overlayCtx.beginPath(); overlayCtx.moveTo(A.x,A.y); overlayCtx.lineTo(B.x,B.y); overlayCtx.stroke();
+
+    document.getElementById('scaleReadout').textContent = det.pxPerCm.toFixed(2)+' px/cm (moneda r='+det.coin.rPx.toFixed(1)+'px)';
+    document.getElementById('axisTiltReadout').textContent = det.tiltDeg.toFixed(1)+'°';
+    document.getElementById('globalReadout').textContent = det.pxPerCm.toFixed(1)+' px/cm · '+(state.profile?state.profile.zArr.length:0)+' pts de perfil';
+  }
+
+  document.getElementById('btnAnalyze').addEventListener('click', function(){ runAutoDetection(); goStep(state.results ? 5 : 2); });
+  document.getElementById('btnReanalyze').addEventListener('click', function(){ runAutoDetection(); });
+
+  // ---------- build (z,r) profile table from the auto-detected contour ----------
+  function buildProfileFromDetection(){
+    var det = state.detection;
+    var body = document.getElementById('profileBody');
+    if(!det || !det.ok){ state.profile=null; renderProfileTable(); state.results=null; renderResults(); return; }
+    var A=det.axis.A, B=det.axis.B;
+    var rows = det.contourPointsPx.map(function(p){
+      var pr = projectOnAxis(p, A, B);
+      return { z_cm: pr.z/det.pxPerCm, r_cm: pr.r/det.pxPerCm };
+    });
+    rows.sort(function(a,b){ return a.z_cm-b.z_cm; });
+
+    // merge near-duplicate z (needed for a well-posed spline: strictly
+    // increasing z between knots).
+    var merged = [];
+    rows.forEach(function(r){
+      var last = merged[merged.length-1];
+      if(last && Math.abs(r.z_cm-last.z_cm) < 1e-4){ last.r_cm = (last.r_cm+r.r_cm)/2; }
+      else { merged.push({z_cm:r.z_cm, r_cm:r.r_cm}); }
+    });
+    rows = merged;
+
+    var zArr = rows.map(function(r){return r.z_cm;});
+    var rArr = rows.map(function(r){return r.r_cm;});
+    var splineFn = null;
+    try{ splineFn = naturalCubicSpline(zArr, rArr); }catch(e){ splineFn = null; }
+    state.profile = { zArr:zArr, rArr:rArr, splineFn:splineFn };
+
+    renderProfileTable();
+    runIntegration();
+  }
+
+  function renderProfileTable(){
+    var body = document.getElementById('profileBody');
+    if(!state.profile){
+      body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Aún no hay datos. Analiza una foto en el paso 1.</td></tr>';
+      return;
+    }
+    body.innerHTML = state.profile.zArr.map(function(z,i){
+      var r=state.profile.rArr[i], r2=r*r, f=Math.PI*r2;
+      return '<tr><td>'+i+'</td><td>'+z.toFixed(3)+'</td><td>'+r.toFixed(3)+'</td><td>'+r2.toFixed(3)+'</td><td>'+f.toFixed(3)+'</td></tr>';
+    }).join('');
+  }
+
+  document.getElementById('btnCopyTable').addEventListener('click', function(){
+    if(!state.profile){ alert('Aún no hay datos de perfil.'); return; }
+    var lines = ['i\tz_cm\tr_cm\tr2_cm2\tf_z'];
+    state.profile.zArr.forEach(function(z,i){
+      var r = state.profile.rArr[i], r2=r*r, f=Math.PI*r2;
+      lines.push(i+'\t'+z.toFixed(4)+'\t'+r.toFixed(4)+'\t'+r2.toFixed(4)+'\t'+f.toFixed(4));
+    });
+    var text = lines.join('\n');
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        var btn=document.getElementById('btnCopyTable'); var old=btn.textContent; btn.textContent='Copiado ✓';
+        setTimeout(function(){btn.textContent=old;},1500);
+      }).catch(function(){ alert('No se pudo copiar automáticamente. Selecciona y copia la tabla manualmente.'); });
+    } else {
+      alert('Tu navegador no soporta copiar automáticamente. Selecciona y copia la tabla manualmente.');
+    }
+  });
+
+  // ---------- hand-written interpolation (NO library call resolves this) ----------
+  // Natural cubic spline: solves the classic tridiagonal system for the
+  // second derivatives via the Thomas algorithm (forward sweep + back
+  // substitution) — textbook numerical-methods material, validated against
+  // known analytic solids of revolution before being wired into this app.
+  function naturalCubicSpline(xArr, yArr){
+    var n = xArr.length;
+    if(n < 2) throw new Error('se necesitan al menos 2 puntos');
+    if(n === 2){
+      var x0=xArr[0], x1=xArr[1], y0=yArr[0], y1=yArr[1];
+      return function(x){ var t=(x-x0)/((x1-x0)||1e-12); return y0+t*(y1-y0); };
+    }
+    var h = new Array(n-1);
+    for(var i=0;i<n-1;i++) h[i] = xArr[i+1]-xArr[i];
+    var a = new Array(n).fill(0), b = new Array(n).fill(1), c = new Array(n).fill(0), d = new Array(n).fill(0);
+    for(var i2=1;i2<n-1;i2++){
+      a[i2] = h[i2-1];
+      b[i2] = 2*(h[i2-1]+h[i2]);
+      c[i2] = h[i2];
+      d[i2] = 6*((yArr[i2+1]-yArr[i2])/h[i2] - (yArr[i2]-yArr[i2-1])/h[i2-1]);
+    }
+    var cp = new Array(n), dp = new Array(n);
+    cp[0]=c[0]/b[0]; dp[0]=d[0]/b[0];
+    for(var i3=1;i3<n;i3++){
+      var mm = b[i3]-a[i3]*cp[i3-1];
+      cp[i3] = c[i3]/mm;
+      dp[i3] = (d[i3]-a[i3]*dp[i3-1])/mm;
+    }
+    var M = new Array(n);
+    M[n-1]=dp[n-1];
+    for(var i4=n-2;i4>=0;i4--) M[i4] = dp[i4]-cp[i4]*M[i4+1];
+
+    return function(x){
+      var xc = Math.max(xArr[0], Math.min(xArr[n-1], x));
+      var k=0;
+      for(var i=0;i<n-1;i++){ if(xc>=xArr[i] && xc<=xArr[i+1]){ k=i; break; } }
+      var hk=h[k];
+      var AA=(xArr[k+1]-xc)/hk, BB=(xc-xArr[k])/hk;
+      return AA*yArr[k] + BB*yArr[k+1] + ((AA*AA*AA-AA)*M[k] + (BB*BB*BB-BB)*M[k+1])*(hk*hk)/6;
+    };
+  }
+  // Piecewise-linear fallback, used only if the spline can't be built.
+  function interpR(z, zArr, rArr){
+    var n=zArr.length;
+    if(z<=zArr[0]) return rArr[0];
+    if(z>=zArr[n-1]) return rArr[n-1];
+    for(var i=0;i<n-1;i++){
+      if(z>=zArr[i] && z<=zArr[i+1]){
+        var t=(z-zArr[i])/((zArr[i+1]-zArr[i])||1e-9);
+        return rArr[i]+t*(rArr[i+1]-rArr[i]);
+      }
+    }
+    return rArr[n-1];
+  }
+  function rOf(z, profile){
+    var zArr=profile.zArr, rArr=profile.rArr;
+    var zc = Math.max(zArr[0], Math.min(zArr[zArr.length-1], z));
+    if(profile.splineFn){
+      var r = profile.splineFn(zc);
+      if(isFinite(r) && r>=0) return r;
+    }
+    return interpR(zc, zArr, rArr);
+  }
+  function fOf(z, profile){ var r=rOf(z,profile); return Math.PI*r*r; }
+
+  // ---------- the 4 integration methods, written by hand (NO library call
+  // resolves these either) — unchanged from the validated version. ----------
+  function trapezoid(profile,a,b,n){
+    var dz=(b-a)/n;
+    var sum = 0.5*fOf(a,profile) + 0.5*fOf(b,profile);
+    for(var i=1;i<n;i++) sum += fOf(a+i*dz, profile);
+    return {integral: sum*dz, dz:dz, n:n};
+  }
+  function simpson(profile,a,b,n){
+    if(n%2!==0) n+=1;
+    var dz=(b-a)/n;
+    var sum = fOf(a,profile) + fOf(b,profile);
+    for(var i=1;i<n;i++){ var zi=a+i*dz; sum += (i%2===0 ? 2:4) * fOf(zi,profile); }
+    return {integral: sum*dz/3, dz:dz, n:n};
+  }
+  function newtonCotes38(profile,a,b,n){
+    if(n%3!==0) n = Math.ceil(n/3)*3;
+    var dz=(b-a)/n;
+    var total=0;
+    for(var k=0;k<n;k+=3){
+      var z0=a+k*dz, z1=a+(k+1)*dz, z2=a+(k+2)*dz, z3=a+(k+3)*dz;
+      total += 3*dz/8*( fOf(z0,profile) + 3*fOf(z1,profile) + 3*fOf(z2,profile) + fOf(z3,profile) );
+    }
+    return {integral: total, dz:dz, n:n};
+  }
+  var GAUSS = {
+    2:{x:[-0.5773502691896257,0.5773502691896257], w:[1,1]},
+    3:{x:[-0.7745966692414834,0,0.7745966692414834], w:[0.5555555555555556,0.8888888888888888,0.5555555555555556]},
+    4:{x:[-0.8611363115940526,-0.3399810435848563,0.3399810435848563,0.8611363115940526], w:[0.3478548451374538,0.6521451548625461,0.6521451548625461,0.3478548451374538]},
+    5:{x:[-0.9061798459386640,-0.5384693101056831,0,0.5384693101056831,0.9061798459386640], w:[0.2369268850561891,0.4786286704993665,0.5688888888888889,0.4786286704993665,0.2369268850561891]}
+  };
+  function gaussComposite(profile,a,b,order,m){
+    var table = GAUSS[order];
+    var dz = (b-a)/m;
+    var total = 0;
+    for(var s=0;s<m;s++){
+      var c=a+s*dz, d=c+dz;
+      for(var i=0;i<table.x.length;i++){
+        var zMapped = (d-c)/2*table.x[i] + (c+d)/2;
+        var wMapped = (d-c)/2*table.w[i];
+        total += wMapped*fOf(zMapped,profile);
+      }
+    }
+    return {integral: total, dz:dz, m:m, order:order};
+  }
+
+  // Parameters chosen by the code (no user input): n=60 is even AND a
+  // multiple of 3, so Simpson 1/3 and Newton-Cotes 3/8 need no adjustment;
+  // Gauss-Legendre 4 points on 15 composite subintervals.
+  var INT_CFG = {n:60, gaussOrder:4, gaussM:15};
+  function runIntegration(){
+    var note = document.getElementById('step4Note');
+    if(!state.profile || state.profile.zArr.length<2){
+      state.results = null;
+      note.className='note warn'; note.textContent='No hay un perfil válido para integrar. Analiza una foto en el paso 1.';
+      renderResults(); updateStepDots();
+      return false;
+    }
+    var profile=state.profile;
+    var a = profile.zArr[0], b = profile.zArr[profile.zArr.length-1];
+    if(!(b>a)){ state.results=null; note.className='note warn'; note.textContent='El intervalo [a,b] detectado no es válido.'; renderResults(); updateStepDots(); return false; }
+    var n=INT_CFG.n, order=INT_CFG.gaussOrder, m=INT_CFG.gaussM;
+
+    var rTrap = trapezoid(profile,a,b,n);
+    var rSimp = simpson(profile,a,b,n);
+    var rNC = newtonCotes38(profile,a,b,n);
+    var rGauss = gaussComposite(profile,a,b,order,m);
+
+    state.results = [
+      {name:'Trapecio (compuesto)', params:'n = '+rTrap.n, dz:rTrap.dz, integral:rTrap.integral},
+      {name:'Simpson 1/3 (compuesto)', params:'n = '+rSimp.n, dz:rSimp.dz, integral:rSimp.integral},
+      {name:'Newton-Cotes 3/8', params:'n = '+rNC.n, dz:rNC.dz, integral:rNC.integral},
+      {name:'Cuadratura de Gauss', params:'orden = '+order+', subintervalos = '+m, dz:rGauss.dz, integral:rGauss.integral}
+    ];
+    document.getElementById('autoA').textContent = a.toFixed(3);
+    document.getElementById('autoB').textContent = b.toFixed(3);
+    document.getElementById('autoN').textContent = n;
+    document.getElementById('autoG').textContent = order+' pts · '+m;
+    note.className='note ok'; note.textContent='Integración calculada automáticamente con los 4 métodos.';
+    renderResults();
+    updateStepDots();
+    return true;
+  }
+
+  function renderResults(){
+    var body = document.getElementById('resultsBody');
+    if(!state.results){ body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Analiza una foto en el paso 1.</td></tr>'; return; }
+    body.innerHTML = state.results.map(function(r){
+      return '<tr><td>'+r.name+'</td><td>'+r.params+'</td><td>'+r.dz.toFixed(4)+'</td><td>'+r.integral.toFixed(4)+'</td><td>'+r.integral.toFixed(4)+'</td></tr>';
+    }).join('');
+    drawProfileChart();
+    drawVolumeChart();
+  }
+
+  // ---------- simple canvas charts (no library) ----------
+  function chartFont(){ return '11px '+ (getComputedStyle(document.body).fontFamily || 'monospace'); }
+  function drawProfileChart(){
+    var cv2 = document.getElementById('profileChart'); var c = cv2.getContext('2d');
+    c.clearRect(0,0,cv2.width,cv2.height);
+    if(!state.profile) return;
+    var pad = {l:44,r:16,t:16,b:30};
+    var W=cv2.width, H=cv2.height;
+    var zArr=state.profile.zArr, rArr=state.profile.rArr;
+    var zMin=Math.min.apply(null,zArr), zMax=Math.max.apply(null,zArr);
+    var rMax=Math.max.apply(null,rArr)*1.15 || 1;
+    function X(z){ return pad.l + (z-zMin)/(zMax-zMin||1)*(W-pad.l-pad.r); }
+    function Y(r){ return H-pad.b - (r/rMax)*(H-pad.t-pad.b); }
+    c.strokeStyle = cssVar('--line'); c.lineWidth=1;
+    c.beginPath(); c.moveTo(pad.l,pad.t); c.lineTo(pad.l,H-pad.b); c.lineTo(W-pad.r,H-pad.b); c.stroke();
+    c.fillStyle = cssVar('--muted'); c.font = chartFont();
+    c.fillText('z (cm)', W-pad.r-36, H-8);
+    c.save(); c.translate(12,pad.t+10); c.rotate(-Math.PI/2); c.fillText('r (cm)',0,0); c.restore();
+    c.strokeStyle = cssVar('--accent-2'); c.lineWidth=2; c.beginPath();
+    zArr.forEach(function(z,i){ var x=X(z), y=Y(rArr[i]); if(i===0) c.moveTo(x,y); else c.lineTo(x,y); });
+    c.stroke();
+    c.fillStyle = cssVar('--accent-2');
+    zArr.forEach(function(z,i){ c.beginPath(); c.arc(X(z),Y(rArr[i]),2.5,0,Math.PI*2); c.fill(); });
+  }
+  function drawVolumeChart(){
+    var cv2 = document.getElementById('volumeChart'); var c = cv2.getContext('2d');
+    c.clearRect(0,0,cv2.width,cv2.height);
+    if(!state.results) return;
+    var pad = {l:44,r:16,t:16,b:56};
+    var W=cv2.width, H=cv2.height;
+    var vals = state.results.map(function(r){return r.integral;});
+    var vMax = Math.max.apply(null,vals)*1.2 || 1;
+    var bw = (W-pad.l-pad.r)/vals.length;
+    c.strokeStyle = cssVar('--line'); c.lineWidth=1;
+    c.beginPath(); c.moveTo(pad.l,pad.t); c.lineTo(pad.l,H-pad.b); c.lineTo(W-pad.r,H-pad.b); c.stroke();
+    var colors = [cssVar('--accent'), cssVar('--accent-2'), cssVar('--danger'), cssVar('--good')];
+    state.results.forEach(function(r,i){
+      var h = (r.integral/vMax)*(H-pad.t-pad.b);
+      var x = pad.l + i*bw + bw*0.15, w = bw*0.7;
+      c.fillStyle = colors[i%colors.length];
+      c.fillRect(x, H-pad.b-h, w, h);
+      c.fillStyle = cssVar('--muted'); c.font = chartFont(); c.textAlign='center';
+      var label = r.name.split(' ')[0];
+      c.fillText(label, x+w/2, H-pad.b+14);
+      c.fillText(r.integral.toFixed(1), x+w/2, H-pad.b-h-6);
+    });
+    c.textAlign='left';
+  }
+
+  // ---------- validation: geometric vs. nominal vs. experimental (never
+  // conflated — see section 7 of the lab's requirements) ----------
+  document.getElementById('nominalVolume').addEventListener('input', function(){
+    var note = document.getElementById('nominalNote');
+    var val = parseFloat(this.value);
+    if(val>0){
+      note.style.display='block'; note.className='note';
+      note.textContent = 'Capacidad nominal (' + val.toFixed(1) + ' mL): solo se muestra como referencia comercial — NO se usa para calcular el error relativo. Para eso, llena el envase hasta el borde y mide con un instrumento graduado.';
+    } else { note.style.display='none'; }
+  });
+  document.getElementById('btnValidate').addEventListener('click', function(){
+    var body = document.getElementById('validationBody');
+    if(!state.results){ body.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted)">Analiza una foto primero (paso 1).</td></tr>'; return; }
+    var ref = parseFloat(document.getElementById('refVolume').value);
+    if(!(ref>0)){ body.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted)">Ingresa un volumen experimental válido (llenado hasta el borde).</td></tr>'; return; }
+    body.innerHTML = state.results.map(function(r){
+      var diff = Math.abs(r.integral-ref);
+      var pct = diff/ref*100;
+      return '<tr><td>'+r.name+'</td><td>'+r.integral.toFixed(3)+'</td><td>'+diff.toFixed(3)+'</td><td>'+pct.toFixed(2)+'%</td></tr>';
+    }).join('');
+  });
+
+  // ---------- step navigation ----------
+  function goStep(n){
+    state.step = n;
+    document.querySelectorAll('.panel').forEach(function(p){ p.classList.toggle('active', parseInt(p.dataset.step)===n); });
+    document.querySelectorAll('nav.steps button').forEach(function(b){ b.classList.toggle('active', parseInt(b.dataset.step)===n); });
+    if(n===5) renderResults();
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+  document.querySelectorAll('nav.steps button').forEach(function(b){
+    b.addEventListener('click', function(){ goStep(parseInt(b.dataset.step)); });
+  });
+  document.querySelectorAll('[data-goto]').forEach(function(b){
+    b.addEventListener('click', function(){ goStep(parseInt(b.dataset.goto)); });
+  });
+  document.getElementById('toStep3').addEventListener('click', function(){ goStep(3); });
+  document.getElementById('toStep4').addEventListener('click', function(){ goStep(4); });
+  document.getElementById('toStep5').addEventListener('click', function(){ goStep(5); });
+  document.getElementById('toStep6').addEventListener('click', function(){ goStep(6); });
+
+  function updateStepDots(){
+    var s1 = state.imageLoaded, s2 = !!(state.detection && state.detection.ok), s3 = !!state.profile, s4 = !!state.results, s5 = !!state.results;
+    var flags = [s1,s2,s3,s4,s5,false];
+    document.querySelectorAll('nav.steps button').forEach(function(b,i){
+      b.classList.toggle('done', !!flags[i]);
+    });
+  }
+
+  loadLocal();
+  updateAnalyzeButton();
+})();
+</script>
+</body>
+</html>
