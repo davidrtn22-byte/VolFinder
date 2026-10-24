@@ -290,7 +290,7 @@
           <strong>Protocolo de captura para una detección automática correcta:</strong>
           envase completo en el encuadre y <strong>centrado</strong>, con una <strong>moneda colombiana</strong> parada o acostada junto a su base (al frente o al lado), a la <strong>misma distancia de la cámara</strong> que el envase, y que se vea grande (≥ 5 % del ancho de la foto). Elige abajo qué moneda usaste.
           <ul style="margin:6px 0 0 18px;padding:0;">
-            <li><strong>Envase de pie:</strong> moneda de pie junto a la base (puede tocarlo), cámara de frente o algo elevada (hasta ≈ 45°). Si la moneda está acostada sobre la mesa, elígelo en "Posición de la moneda".</li>
+            <li><strong>Envase de pie:</strong> moneda de pie junto a la base (al frente tocándola, o al lado), cámara de frente y a la altura del envase o algo elevada (hasta ≈ 45°). Si la moneda queda delante, la app corrige esa diferencia de distancia con una estimación (la precisión baja a ≈ ±10 %); al lado, a la misma distancia, es lo más exacto. Si la moneda está acostada sobre la mesa, elígelo en "Posición de la moneda".</li>
             <li><strong>Envase acostado:</strong> moneda acostada sobre la mesa junto a él; cámara desde arriba o en diagonal, con el envase atravesado (de lado) frente a la cámara.</li>
             <li>Mejor sobre una superficie opaca (mesón, mesa de madera); el vidrio y los espejos generan reflejos que confunden la silueta. Sin reflejos fuertes. Usa la foto original de la cámara (conserva los datos de zoom que mejoran la precisión).</li>
           </ul>
@@ -813,14 +813,50 @@
         }
       }
       var bgdModel = T(new cv.Mat()), fgdModel = T(new cv.Mat());
+      if(cv.setRNGSeed) cv.setRNGSeed(20261028);   // reproducible: same photo -> same result
       cv.grabCut(small, gcMask, new cv.Rect(0,0,sw,sh), bgdModel, fgdModel, opts.grabIters||5, cv.GC_INIT_WITH_MASK);
       var fgSmall = T(new cv.Mat(sh, sw, cv.CV_8UC1, new cv.Scalar(0)));
-      for(var i=0;i<sw*sh;i++){ var v=gcMask.data[i]; fgSmall.data[i] = (v===cv.GC_FGD || v===cv.GC_PR_FGD) ? 255 : 0; }
+      var votes = new Uint8Array(sw*sh), nRuns = 1;
+      for(var i=0;i<sw*sh;i++){ var v=gcMask.data[i]; if(v===cv.GC_FGD || v===cv.GC_PR_FGD) votes[i]=1; }
+      // GrabCut is chaotic on clear plastic over a plain wall (a tiny change in working size can
+      // truncate or leak the mask), so repeat it at slightly different working sizes and keep
+      // the pixels that the majority of runs call object.
+      var extra = (opts.voteSizes!==undefined) ? opts.voteSizes : [420, 540, 450, 510];
+      for(var ve=0; ve<extra.length; ve++){
+        var sc2 = Math.min(1, extra[ve]/Math.max(W,H));
+        var sw2 = Math.max(16, Math.round(W*sc2)), sh2 = Math.max(16, Math.round(H*sc2));
+        var small2 = T(new cv.Mat());
+        cv.resize(rgb, small2, new cv.Size(sw2,sh2), 0, 0, cv.INTER_AREA);
+        var gm2 = T(new cv.Mat(sh2, sw2, cv.CV_8UC1, new cv.Scalar(cv.GC_PR_FGD)));
+        var ring2 = Math.max(2, Math.round(0.012*Math.min(sw2,sh2)));
+        var band2 = Math.max(ring2+2, Math.round((opts.seedBand!==undefined?opts.seedBand:0.08)*Math.min(sw2,sh2)));
+        var cx2 = sw2/2, cy2 = sh2/2, rc2 = Math.max(3, 0.035*Math.min(sw2,sh2));
+        for(var y3=0;y3<sh2;y3++) for(var x3=0;x3<sw2;x3++){
+          var v3 = cv.GC_PR_FGD;
+          if(opts.seedBand!==0 && (y3>=sh2-band2*1.5 || x3<band2 || x3>=sw2-band2 || (opts.topBand && y3<band2))) v3 = cv.GC_PR_BGD;
+          if(y3<ring2 || y3>=sh2-ring2*bmul || x3<ring2 || x3>=sw2-ring2) v3 = cv.GC_BGD;
+          if((x3-cx2)*(x3-cx2)+(y3-cy2)*(y3-cy2) < rc2*rc2) v3 = cv.GC_FGD;
+          gm2.data[y3*sw2+x3] = v3;
+        }
+        var bm2 = T(new cv.Mat()), fm2 = T(new cv.Mat());
+        if(cv.setRNGSeed) cv.setRNGSeed(20261028+ve+1);
+        cv.grabCut(small2, gm2, new cv.Rect(0,0,sw2,sh2), bm2, fm2, opts.grabIters||5, cv.GC_INIT_WITH_MASK);
+        var f2 = T(new cv.Mat(sh2, sw2, cv.CV_8UC1, new cv.Scalar(0)));
+        for(var i5=0;i5<sw2*sh2;i5++){ var v5=gm2.data[i5]; f2.data[i5] = (v5===cv.GC_FGD || v5===cv.GC_PR_FGD) ? 255 : 0; }
+        var f2b = T(new cv.Mat());
+        cv.resize(f2, f2b, new cv.Size(sw,sh), 0, 0, cv.INTER_NEAREST);
+        for(var i6=0;i6<sw*sh;i6++) if(f2b.data[i6]>127) votes[i6]++;
+        nRuns++;
+      }
+      var need = Math.floor(nRuns/2)+1;
+      for(var i=0;i<sw*sh;i++){ fgSmall.data[i] = (votes[i]>=need) ? 255 : 0; }
       var fg = T(new cv.Mat());
       cv.resize(fgSmall, fg, new cv.Size(W,H), 0, 0, cv.INTER_LINEAR);
       cv.threshold(fg, fg, 127, 255, cv.THRESH_BINARY);
       var k5 = T(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5)));
-      cv.morphologyEx(fg, fg, cv.MORPH_OPEN, k5);
+      var ksz = Math.max(5, Math.round(0.009*Math.min(W,H))); if(ksz%2===0) ksz++;
+      var kOpen = T(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksz,ksz)));   // removes thin slivers (counter edge, cables)
+      cv.morphologyEx(fg, fg, cv.MORPH_OPEN, kOpen);
       cv.morphologyEx(fg, fg, cv.MORPH_CLOSE, k5);
       dbgFg = fg;
 
@@ -1149,6 +1185,18 @@
         ux0=-ux0; uy0=-uy0;
         var tmp=tmin0; tmin0=-tmax0; tmax0=-tmp;
       }
+      // despike: a single bin far wider/narrower than its neighbours is a segmentation leak
+      // (counter edge, shadow line, specular blob), not part of the bottle.
+      (function(){
+        var n0=rArr.length, out=rArr.slice();
+        for(var i=1;i<n0-1;i++){
+          var w=[]; for(var jj=Math.max(0,i-4); jj<=Math.min(n0-1,i+4); jj++) w.push(rArr[jj]);
+          w.sort(function(a,b){return a-b;});
+          var med=w[w.length>>1];
+          if(rArr[i]>med*1.10 || rArr[i]<med*0.85){ out[i]=med; susArr[i]=true; }
+        }
+        for(var i2=0;i2<n0;i2++) rArr[i2]=out[i2];
+      })();
       // Above the widest section a bottle's shoulders and neck are convex. Clear plastic is often
       // only partly segmented there, so take the upper concave envelope of r(t) from the widest
       // section to the end (it never lowers a measured radius).
@@ -1247,16 +1295,29 @@
         //   depth ~ 1/(cos(p)*y_n + sin(p)),  y_n = (row - cy)/f.
         var coinBottomY = e.cy + Math.sqrt(e.a*e.a*Math.sin(e.ang)*Math.sin(e.ang) + e.b*e.b*Math.cos(e.ang)*Math.cos(e.ang));
         var tTmp = new Float64Array(n), tLo = tArr[0], tHi = tArr[tArr.length-1], baseBottomY = -Infinity;
+        // front edge of the base: rows of the lowest contour points within the central part of
+        // the base; a high percentile (not the maximum) so a stray tail/reflection pixel cannot
+        // move it (a few pixels here change the depth ratio a lot).
+        var ysBase = [], sLim = 0.8*Math.max(rArr[0],rArr[1]||0,rArr[2]||0);
         for(var p6=0;p6<n;p6++){
           var tt = (PX[p6]-mx)*ux0 + (PY[p6]-my)*uy0;
-          if(tt < tLo + 0.06*(tHi-tLo) && PY[p6]>baseBottomY) baseBottomY = PY[p6];
+          var ss = Math.abs(-(PX[p6]-mx)*uy0 + (PY[p6]-my)*ux0);
+          if(tt < tLo + 0.06*(tHi-tLo) && ss < sLim) ysBase.push(PY[p6]);
         }
+        if(ysBase.length<5){ for(var p7=0;p7<n;p7++){ var tt7=(PX[p7]-mx)*ux0+(PY[p7]-my)*uy0; if(tt7 < tLo + 0.06*(tHi-tLo)) ysBase.push(PY[p7]); } }
+        ysBase.sort(function(a,b){return a-b;});
+        baseBottomY = ysBase[Math.min(ysBase.length-1, Math.floor(0.9*ysBase.length))];
         var lamContact = lamC + Rcm*sp;              // coin's ground-contact point (R below its centre)
         var ynCb = (coinBottomY-cyI)/f, ynRim = (baseBottomY-cyI)/f;
         var denCb = cp*ynCb + sp, denRim = cp*ynRim + sp;
         var rbCm = 0;
         var HcL = lamC*(cp*ynC + sp);                 // camera height above the table (cm), valid for a coin lying on it
         var useLyingCoin = (coinPose==='lying') && denRim>0.03 && HcL>0;
+        // the coin overlaps the bottle's base horizontally -> it stands in FRONT of the bottle
+        var rBase0 = 0; for(var q8=0;q8<Math.min(14,rArr.length);q8++) if(rArr[q8]>rBase0) rBase0=rArr[q8];
+        var coinLat = Math.abs(-(e.cx-mx)*uy0 + (e.cy-my)*ux0);
+        var coinInFront = (opts.standMode!=='diff') && (opts.gapFrac!==0) && (coinLat - e.a < rBase0) && (coinPose==='standing');
+        var gapFracUse = (opts.gapFrac!==undefined) ? +opts.gapFrac : 0.5;
         var useSame = (opts.standMode==='same') || !(denCb>0.03) || !(denRim>0.03);
         if(useLyingCoin){
           // the table plane is known from the lying coin: intersect the ray of the base rim with it
@@ -1272,10 +1333,20 @@
           var lamRim0 = lamCenter - rbCm*cp;
           var Zb = lamCenter, Yb = ynRim*lamRim0 - rbCm*sp;
           dbgInfo = {mode:'same', lamRim:lamRim0};
+        } else if(coinInFront){
+          // coin stands next to / in front of the base: its centre is, on average, a fraction of the
+          // bottle's radius closer to the camera than the bottle axis (the base row cannot be
+          // trusted: the coin hides the front of the base and the table reflects it).
+          var rMax0 = 0; for(var q9=0;q9<rArr.length;q9++) if(rArr[q9]>rMax0) rMax0=rArr[q9];
+          var gapCm = gapFracUse*rMax0*lamC/f;
+          var Zb = lamContact + gapCm, Hc9 = lamContact*denCb, Yb = (Hc9 - sp*Zb)/cp;
+          dbgInfo = {mode:'gap', gapCm:gapCm, lamContact:lamContact, coinLat:coinLat, rBase0:rBase0};
         } else {
           var lamRim = lamContact*denCb/denRim;
           rbCm = rArr[0]*lamRim/f;
-          var Zb = lamRim + rbCm*cp, Yb = ynRim*lamRim - rbCm*sp;
+          var kRb = (opts.kRb!==undefined)?+opts.kRb:1;
+          var Zb = lamRim + kRb*rbCm*cp, Yb = ynRim*lamRim - kRb*rbCm*sp;
+          if(opts.kDepth!==undefined){ var kd=+opts.kDepth; var Zb0=Zb; Zb = lamContact + kd*(Zb0-lamContact); var lamRimK=lamContact+kd*(lamRim-lamContact); rbCm=rArr[0]*lamRimK/f; Yb = ynRim*lamRimK - rbCm*sp; }
           dbgInfo = {mode:'diff', lamRim:lamRim, lamContact:lamContact, deltaPx:baseBottomY-coinBottomY};
         }
         if(!(Zb>0)){ okModel=false; }
