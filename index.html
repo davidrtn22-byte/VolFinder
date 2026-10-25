@@ -288,9 +288,9 @@
         </div>
         <div class="note">
           <strong>Protocolo de captura para una detección automática correcta:</strong>
-          envase completo en el encuadre y <strong>centrado</strong>, con una <strong>moneda colombiana</strong> parada o acostada junto a su base (al frente o al lado), a la <strong>misma distancia de la cámara</strong> que el envase, y que se vea grande (≥ 5 % del ancho de la foto). Elige abajo qué moneda usaste.
+          envase completo en el encuadre y <strong>centrado</strong>, con una <strong>moneda colombiana</strong> parada o acostada junto a su base (al frente o al lado), a la <strong>misma distancia de la cámara</strong> que el envase, y que se vea grande. Elige abajo qué moneda usaste.
           <ul style="margin:6px 0 0 18px;padding:0;">
-            <li><strong>Envase de pie:</strong> moneda de pie junto a la base (al frente tocándola, o al lado), cámara de frente y a la altura del envase o algo elevada (hasta ≈ 45°). Si la moneda queda delante, la app corrige esa diferencia de distancia con una estimación (la precisión baja a ≈ ±10 %); al lado, a la misma distancia, es lo más exacto. Si la moneda está acostada sobre la mesa, elígelo en "Posición de la moneda".</li>
+            <li><strong>Envase de pie:</strong> moneda de pie junto a la base (al frente tocándola, o al lado), cámara de frente y a la altura del envase o algo elevada (hasta ≈ 45°). Si la moneda queda delante, la app corrige esa diferencia de distancia con una estimación; al lado, a la misma distancia, es lo más exacto. Si la moneda está acostada sobre la mesa, elígelo en "Posición de la moneda".</li>
             <li><strong>Envase acostado:</strong> moneda acostada sobre la mesa junto a él; cámara desde arriba o en diagonal, con el envase atravesado (de lado) frente a la cámara.</li>
             <li>Mejor sobre una superficie opaca (mesón, mesa de madera); el vidrio y los espejos generan reflejos que confunden la silueta. Sin reflejos fuertes. Usa la foto original de la cámara (conserva los datos de zoom que mejoran la precisión).</li>
           </ul>
@@ -434,6 +434,11 @@
       <!-- STEP 5 -->
       <section class="panel" data-step="5">
         <div class="panel-title"><h2>5 · Resultados</h2></div>
+        <div class="note ok" id="finalBox" style="display:none;margin:0 0 14px;">
+          <div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;opacity:.8;">Resultado final</div>
+          <div style="font-size:28px;font-weight:700;margin:4px 0;"><span id="finalVol">–</span> mL</div>
+          <div id="finalWhy" class="small"></div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Método</th><th>Parámetros</th><th>Δz (cm)</th><th>∫f dz</th><th>Volumen (cm³ = mL)</th></tr></thead>
@@ -473,6 +478,7 @@
           <button class="btn primary" id="btnValidate">Comparar</button>
         </div>
         <div class="note" id="nominalNote" style="display:none;"></div>
+        <div class="note" id="finalSummary" style="display:none;"></div>
 
         <div class="table-wrap">
           <table>
@@ -1894,8 +1900,27 @@
     body.innerHTML = state.results.map(function(r){
       return '<tr><td>'+r.name+'</td><td>'+r.params+'</td><td>'+r.dz.toFixed(4)+'</td><td>'+r.integral.toFixed(4)+'</td><td>'+r.integral.toFixed(4)+'</td></tr>';
     }).join('');
+    renderFinal();
     drawProfileChart();
     drawVolumeChart();
+  }
+
+  // Final result: the volume reported by the app. Gauss-Legendre (composite, 4 points per subinterval) is the
+  // method with the highest order of accuracy for a smooth integrand (exact for polynomials up to degree 7 per
+  // subinterval), so it is reported as THE result; the other three are cross-checks.
+  function finalResult(){
+    if(!state.results) return null;
+    var g = state.results[state.results.length-1];
+    var vals = state.results.map(function(r){return r.integral;});
+    var spread = Math.max.apply(null,vals) - Math.min.apply(null,vals);
+    return {name:g.name, vol:g.integral, spread:spread, rel:spread/g.integral*100};
+  }
+  function renderFinal(){
+    var box = document.getElementById('finalBox'), fr = finalResult();
+    if(!fr){ box.style.display='none'; return; }
+    box.style.display='block';
+    document.getElementById('finalVol').textContent = fr.vol.toFixed(1);
+    document.getElementById('finalWhy').textContent = 'Obtenido con ' + fr.name + ' (4 puntos por subintervalo, el método de mayor orden de exactitud). Los 4 métodos coinciden dentro de ' + fr.spread.toFixed(1) + ' mL (' + fr.rel.toFixed(2) + ' %): la integración numérica no es la fuente del error; la precisión depende de la foto (silueta y escala).';
   }
 
   // ---------- simple canvas charts (no library) ----------
@@ -1967,6 +1992,11 @@
       var pct = diff/ref*100;
       return '<tr><td>'+r.name+'</td><td>'+r.integral.toFixed(3)+'</td><td>'+diff.toFixed(3)+'</td><td>'+pct.toFixed(2)+'%</td></tr>';
     }).join('');
+    var fr = finalResult(), dF = Math.abs(fr.vol-ref), pF = dF/ref*100;
+    body.innerHTML += '<tr style="font-weight:700;background:rgba(255,176,59,.12)"><td>Resultado final ('+fr.name+')</td><td>'+fr.vol.toFixed(3)+'</td><td>'+dF.toFixed(3)+'</td><td>'+pF.toFixed(2)+'%</td></tr>';
+    var sum = document.getElementById('finalSummary');
+    sum.style.display='block'; sum.className = 'note ' + (pF<=5 ? 'ok' : 'warn');
+    sum.textContent = 'Resultado final: ' + fr.vol.toFixed(1) + ' mL vs. experimental ' + ref.toFixed(1) + ' mL → error ' + pF.toFixed(2) + ' % ' + (pF<=5 ? '(cumple la meta de ≤ 5 %).' : '(la meta del laboratorio es ≤ 5 %).');
   });
 
   // ---------- step navigation ----------
