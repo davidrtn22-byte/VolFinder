@@ -1445,6 +1445,18 @@
           // trusted: the coin hides the front of the base and the table reflects it).
           var rMax0 = 0; for(var q9=0;q9<rArr.length;q9++) if(rArr[q9]>rMax0) rMax0=rArr[q9];
           var gapCm = gapFracUse*rMax0*lamC/f;
+          if(opts.touch!==0){
+            // The coin leans on / touches the bottle: its flat face is tangent to the bottle at its nearest
+            // lateral edge, so (in the top view) it is sqrt(rb^2 - x^2) in front of the bottle's axis,
+            // rb = bottle radius just above the foot, x = lateral distance from the axis to the coin's near edge.
+            var cmpx = (2*e.a)/coinDcm, zLo = tArr[0]+0.8*cmpx, zHi = tArr[0]+2.2*cmpx, sRb=0, nRb=0;
+            for(var qb=0;qb<tArr.length;qb++) if(tArr[qb]>=zLo && tArr[qb]<=zHi){ sRb+=rArr[qb]; nRb++; }
+            if(nRb>0){
+              var rbC = (sRb/nRb)/cmpx, xC = Math.max(0, coinLat - e.a)/cmpx;
+              var kT = (opts.touchK!==undefined) ? +opts.touchK : 0.9;
+              gapCm = (xC < rbC) ? kT*Math.sqrt(rbC*rbC - xC*xC) : 0;
+            }
+          }
           var Zb = lamContact + gapCm, Hc9 = lamContact*denCb, Yb = (Hc9 - sp*Zb)/cp;
           dbgInfo = {mode:'gap', gapCm:gapCm, lamContact:lamContact, coinLat:coinLat, rBase0:rBase0};
         } else {
@@ -1480,6 +1492,34 @@
         sMin=sMax=pxPerCm; note3d='fallback';
       }
       var rows = rowsTmp;
+      // ---- volume-oriented corrections of the silhouette profile ----
+      // (1) the cap: a short wider plateau at the very end, above a neck minimum. The liquid stops at
+      //     the neck, so the profile is cut at that minimum (opts.trimCap===false disables it).
+      // (2) wall thickness: the silhouette is the OUTER surface; the capacity is bounded by the inner one.
+      var capCutCm = 0;
+      if(opts.trimCap!==false && rows.length>20){
+        var nR = rows.length, zEnd = rows[nR-1].z_cm, zTot = zEnd - rows[0].z_cm;
+        var jBest = -1, rBestMin = Infinity;
+        for(var jj=Math.floor(nR*0.7); jj<nR-4; jj++){
+          var rj = rows[jj].r_cm, isMin = true;
+          for(var kk=Math.max(0,jj-3); kk<=Math.min(nR-1,jj+3); kk++) if(rows[kk].r_cm < rj-1e-9){ isMin=false; break; }
+          if(!isMin) continue;
+          var sAft=0, nAft=0; for(var k3=jj+1;k3<nR;k3++){ sAft+=rows[k3].r_cm; nAft++; }
+          var capLen = zEnd - rows[jj].z_cm;
+          if(nAft>=4 && (sAft/nAft) >= 1.06*rj && capLen>=0.8 && capLen<=0.2*zTot && rj < rBestMin){ jBest=jj; rBestMin=rj; }
+        }
+        if(jBest>0){ capCutCm = zEnd - rows[jBest].z_cm; rows = rows.slice(0, jBest+1); }
+        else {
+          // no separate cap plateau (clear neck blending into the cap): drop the top ~3 cm (at most 12 % of the length)
+          // as long as that part is still the narrow neck (radius < 50 % of the maximum)
+          var rMx=0, iMx=0; for(var q5=0;q5<nR;q5++) if(rows[q5].r_cm>rMx){ rMx=rows[q5].r_cm; iMx=q5; }
+          var cutLen = Math.min(0.12*zTot, 3.3), zCut = zEnd - cutLen, q6 = nR-1;
+          while(q6>iMx+5 && rows[q6].z_cm > zCut) q6--;
+          if(q6>iMx+5 && rows[q6].r_cm < 0.5*rMx && nR-q6 >= 4){ capCutCm = zEnd - rows[q6].z_cm; rows = rows.slice(0, q6+1); }
+        }
+      }
+      var wallCm = (opts.wallCm!==undefined) ? +opts.wallCm : 0.03;
+      rows = rows.map(function(rw){ return {z_cm:rw.z_cm, r_cm:Math.max(0.15, rw.r_cm - wallCm)}; });
       // ---- sanity checks: refuse absurd results instead of showing wrong numbers ----
       var warnings = [];
       var lenCm = rows[rows.length-1].z_cm - rows[0].z_cm, rMaxCm = 0;
@@ -1487,6 +1527,10 @@
       var bottleFrac = bottleInfo.area/(W*H);
       dbgState = {posture:posture, coinPose:coinPose, pitchDeg:pitch*180/Math.PI, dbgInfo:dbgInfo, coin:{cx:e.cx,cy:e.cy,a:e.a,b:e.b,ang:e.ang}, f:f, coinOverlaps:coinOverlaps, rows0:rows.slice(0,3), rowsN:rows.slice(-3), sRange:[sMin,sMax], baseBottomYinfo:(typeof baseBottomY!=='undefined'?baseBottomY:null), axisAng:Math.atan2(uy0,ux0)*180/Math.PI, model:note3d};
       if(bottleFrac > 0.45) return fail('El envase ocupa casi toda la foto o el fondo es demasiado complejo. Aléjate un poco para que se vea completo, con la moneda al lado.');
+      var lenFull = lenCm + capCutCm, pitchD = pitch*180/Math.PI;
+      if(posture==='standing' && (lenFull < 12 || Math.abs(pitchD) > 45)){
+        return fail('La silueta detectada es demasiado corta o la inclinación estimada es excesiva (largo ≈ '+lenFull.toFixed(0)+' cm, inclinación ≈ '+pitchD.toFixed(0)+'°). Asegúrate de que la moneda y el envase completo (de la base a la tapa) salgan enteros en la foto.');
+      }
       if(!(lenCm>8 && lenCm<46) || !(rMaxCm>1.2 && rMaxCm<8) || lenCm/(2*rMaxCm) < 1.1 || lenCm/(2*rMaxCm) > 16){
         return fail('Las medidas detectadas no son las de un envase (largo ≈ '+lenCm.toFixed(0)+' cm, radio máx. ≈ '+rMaxCm.toFixed(1)+' cm). Revisa que se haya detectado bien la moneda y la silueta (paso 2), o repite la foto con más contraste.');
       }
@@ -1508,7 +1552,7 @@
         coin:{cx:e.cx, cy:e.cy, a:e.a, b:e.b, angRad:e.ang, q:q},
         pxPerCm:pxPerCm, kappa:kappa, posture:posture, coinPose:coinPose, focalPx:f, scaleRange:[sMin,sMax], depthCoinCm:depthCoin, pitchDeg:pitch*180/Math.PI, model:(note3d||'pinhole'), dbgInfo:dbgInfo, axisAngleDeg: Math.atan2(uy0,ux0)*180/Math.PI,
         axis:{A:A,B:B}, contourPointsPx:overlay, profileRows:rows,
-        warnings:warnings, lengthCm:lenCm, rMaxCm:rMaxCm,
+        warnings:warnings, lengthCm:lenCm+capCutCm, rMaxCm:rMaxCm,
         touchesBorder: bottleInfo.touches, imgW:W, imgH:H
       };
     }catch(err){
