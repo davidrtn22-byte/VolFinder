@@ -800,52 +800,96 @@
       // background (the surface and wall the bottle stands on); a small disc at the
       // centre of the picture = surely object (the protocol asks to centre the bottle);
       // everything else = probably object.
-      var band = Math.max(ring+2, Math.round((opts.seedBand!==undefined?opts.seedBand:0.08)*Math.min(sw,sh)));
       var bmul = (opts.bottomMult!==undefined?opts.bottomMult:3);
-      var cxs = sw/2, cys = sh/2, rc = Math.max(3, 0.035*Math.min(sw,sh));
-      for(var y=0;y<sh;y++){
-        for(var x=0;x<sw;x++){
-          var v = cv.GC_PR_FGD;
-          if(opts.seedBand!==0 && (y>=sh-band*1.5 || x<band || x>=sw-band || (opts.topBand && y<band))) v = cv.GC_PR_BGD;
-          if(y<ring || y>=sh-ring*bmul || x<ring || x>=sw-ring) v = cv.GC_BGD;
-          if((x-cxs)*(x-cxs)+(y-cys)*(y-cys) < rc*rc) v = cv.GC_FGD;
-          gcMask.data[y*sw+x] = v;
-        }
+      // portrait photo of an upright bottle: a thin strip down the middle is surely object (a dark
+      // lower body over a dark table is otherwise easily lost). Not used for lying bottles.
+      var useStrip = (opts.strip!==undefined) ? +opts.strip : ((opts.posture!=='lying' && H>=1.05*W) ? 0.02 : 0);
+      // Rough object region from edges: the bottle (even clear plastic) is bounded and crossed by
+      // edges while a plain wall is not. Edges are dilated, the blob that holds the picture centre
+      // is filled, and everything outside it becomes "probably background" (prevents leaks into a
+      // plain wall and truncated clear shoulders). Skipped when edges cover most of the picture
+      // (granite, wood...): there it carries no information.
+      function edgeBlob(sm, w1, h1){
+        try{
+          var g = T(new cv.Mat()); cv.cvtColor(sm, g, cv.COLOR_RGB2GRAY);
+          cv.GaussianBlur(g, g, new cv.Size(3,3), 0, 0);
+          var ed = T(new cv.Mat()); cv.Canny(g, ed, 30, 90);
+          var kk = 2*Math.round(0.03*Math.min(w1,h1))+1;
+          var kd = T(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(kk,kk)));
+          cv.dilate(ed, ed, kd);
+          var edFull = T(ed.clone());
+          // only the central band can hold the bottle (protocol: centred); cuts links to chairs, shelves...
+          var x0b = Math.round(0.2*w1), x1b = Math.round(0.8*w1);
+          for(var yb=0; yb<h1; yb++){ for(var xb=0; xb<x0b; xb++) ed.data[yb*w1+xb]=0; for(var xc=x1b; xc<w1; xc++) ed.data[yb*w1+xc]=0; }
+          for(var xt=x0b; xt<x1b; xt++){ ed.data[xt]=255; ed.data[(h1-1)*w1+xt]=255; }   // close outlines that run off the picture's top/bottom
+          var cs = T(new cv.MatVector()), hh = T(new cv.Mat());
+          cv.findContours(ed, cs, hh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+          var best=-1, bestA=0, ccx=w1/2, ccy=h1/2;
+          for(var i0=0;i0<cs.size();i0++){
+            var c0 = T(cs.get(i0)), r0 = cv.boundingRect(c0), a0 = cv.contourArea(c0);
+            if(ccx>=r0.x && ccx<=r0.x+r0.width && ccy>=r0.y && ccy<=r0.y+r0.height && a0>bestA){ bestA=a0; best=i0; }
+          }
+          if(best<0){ if(opts.dbgCands) console.log('blob: no contour at centre, n=',cs.size()); return null; }
+          var bl = T(new cv.Mat(h1, w1, cv.CV_8UC1, new cv.Scalar(0)));
+          var one = T(new cv.MatVector()); one.push_back(T(cs.get(best)));
+          cv.drawContours(bl, one, 0, new cv.Scalar(255), -1);
+          var cnt = cv.countNonZero(bl);
+          // small compact outlines anywhere (the coin, wherever it stands) are kept as possible object
+          try{
+            var cs2 = T(new cv.MatVector()), hh2 = T(new cv.Mat());
+            cv.findContours(edFull, cs2, hh2, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            for(var j0=0;j0<cs2.size();j0++){
+              var cj = T(cs2.get(j0)), aj = cv.contourArea(cj), rj = cv.boundingRect(cj);
+              var asp = rj.width/Math.max(1,rj.height);
+              if(aj>0.0015*w1*h1 && aj<0.04*w1*h1 && asp>0.55 && asp<1.8 && aj/(rj.width*rj.height)>0.5){
+                var one2 = T(new cv.MatVector()); one2.push_back(cj); cv.drawContours(bl, one2, 0, new cv.Scalar(255), -1);
+              }
+            }
+          }catch(err2){}
+          if(opts.dbgCands) console.log('blob frac', (cnt/(w1*h1)).toFixed(2), 'contours', cs.size());
+          if(cnt > 0.5*w1*h1 || cnt < 0.03*w1*h1) return null;
+          return bl;
+        }catch(err){ return null; }
       }
-      var bgdModel = T(new cv.Mat()), fgdModel = T(new cv.Mat());
-      if(cv.setRNGSeed) cv.setRNGSeed(20261028);   // reproducible: same photo -> same result
-      cv.grabCut(small, gcMask, new cv.Rect(0,0,sw,sh), bgdModel, fgdModel, opts.grabIters||5, cv.GC_INIT_WITH_MASK);
-      var fgSmall = T(new cv.Mat(sh, sw, cv.CV_8UC1, new cv.Scalar(0)));
-      var votes = new Uint8Array(sw*sh), nRuns = 1;
-      for(var i=0;i<sw*sh;i++){ var v=gcMask.data[i]; if(v===cv.GC_FGD || v===cv.GC_PR_FGD) votes[i]=1; }
+      function grabRun(maxSide, seed){
+        var s1 = Math.min(1, maxSide/Math.max(W,H));
+        var w1 = Math.max(16, Math.round(W*s1)), h1 = Math.max(16, Math.round(H*s1));
+        var sm = T(new cv.Mat()); cv.resize(rgb, sm, new cv.Size(w1,h1), 0, 0, cv.INTER_AREA);
+        var gm = T(new cv.Mat(h1, w1, cv.CV_8UC1, new cv.Scalar(cv.GC_PR_FGD)));
+        var ring1 = Math.max(2, Math.round(0.012*Math.min(w1,h1)));
+        var band1 = Math.max(ring1+2, Math.round((opts.seedBand!==undefined?opts.seedBand:0.08)*Math.min(w1,h1)));
+        var cx1 = w1/2, cy1 = h1/2, rc1 = Math.max(3, 0.035*Math.min(w1,h1));
+        var blob = (opts.edgePrior===false) ? null : edgeBlob(sm, w1, h1);
+        for(var y=0;y<h1;y++){
+          for(var x=0;x<w1;x++){
+            var v = cv.GC_PR_FGD;
+            if(blob && !blob.data[y*w1+x]) v = cv.GC_PR_BGD;
+            if(opts.seedBand!==0 && (y>=h1-band1*1.5 || x<band1 || x>=w1-band1 || (opts.topBand && y<band1))) v = cv.GC_PR_BGD;
+            if(y<ring1 || y>=h1-ring1*bmul || x<ring1 || x>=w1-ring1) v = cv.GC_BGD;
+            if((x-cx1)*(x-cx1)+(y-cy1)*(y-cy1) < rc1*rc1) v = cv.GC_FGD;
+            if(useStrip && Math.abs(x-cx1) < useStrip*w1 && y>0.22*h1 && y<0.7*h1) v = cv.GC_FGD;
+            gm.data[y*w1+x] = v;
+          }
+        }
+        var bm = T(new cv.Mat()), fm = T(new cv.Mat());
+        if(cv.setRNGSeed) cv.setRNGSeed(seed);   // reproducible: same photo -> same result
+        cv.grabCut(sm, gm, new cv.Rect(0,0,w1,h1), bm, fm, opts.grabIters||5, cv.GC_INIT_WITH_MASK);
+        var out = new Uint8Array(w1*h1);
+        for(var i=0;i<w1*h1;i++){ var vv=gm.data[i]; out[i] = (vv===cv.GC_FGD || vv===cv.GC_PR_FGD) ? 255 : 0; }
+        return {w:w1, h:h1, data:out};
+      }
       // GrabCut is chaotic on clear plastic over a plain wall (a tiny change in working size can
       // truncate or leak the mask), so repeat it at slightly different working sizes and keep
       // the pixels that the majority of runs call object.
-      var extra = (opts.voteSizes!==undefined) ? opts.voteSizes : [420, 540, 450, 510];
-      for(var ve=0; ve<extra.length; ve++){
-        var sc2 = Math.min(1, extra[ve]/Math.max(W,H));
-        var sw2 = Math.max(16, Math.round(W*sc2)), sh2 = Math.max(16, Math.round(H*sc2));
-        var small2 = T(new cv.Mat());
-        cv.resize(rgb, small2, new cv.Size(sw2,sh2), 0, 0, cv.INTER_AREA);
-        var gm2 = T(new cv.Mat(sh2, sw2, cv.CV_8UC1, new cv.Scalar(cv.GC_PR_FGD)));
-        var ring2 = Math.max(2, Math.round(0.012*Math.min(sw2,sh2)));
-        var band2 = Math.max(ring2+2, Math.round((opts.seedBand!==undefined?opts.seedBand:0.08)*Math.min(sw2,sh2)));
-        var cx2 = sw2/2, cy2 = sh2/2, rc2 = Math.max(3, 0.035*Math.min(sw2,sh2));
-        for(var y3=0;y3<sh2;y3++) for(var x3=0;x3<sw2;x3++){
-          var v3 = cv.GC_PR_FGD;
-          if(opts.seedBand!==0 && (y3>=sh2-band2*1.5 || x3<band2 || x3>=sw2-band2 || (opts.topBand && y3<band2))) v3 = cv.GC_PR_BGD;
-          if(y3<ring2 || y3>=sh2-ring2*bmul || x3<ring2 || x3>=sw2-ring2) v3 = cv.GC_BGD;
-          if((x3-cx2)*(x3-cx2)+(y3-cy2)*(y3-cy2) < rc2*rc2) v3 = cv.GC_FGD;
-          gm2.data[y3*sw2+x3] = v3;
-        }
-        var bm2 = T(new cv.Mat()), fm2 = T(new cv.Mat());
-        if(cv.setRNGSeed) cv.setRNGSeed(20261028+ve+1);
-        cv.grabCut(small2, gm2, new cv.Rect(0,0,sw2,sh2), bm2, fm2, opts.grabIters||5, cv.GC_INIT_WITH_MASK);
-        var f2 = T(new cv.Mat(sh2, sw2, cv.CV_8UC1, new cv.Scalar(0)));
-        for(var i5=0;i5<sw2*sh2;i5++){ var v5=gm2.data[i5]; f2.data[i5] = (v5===cv.GC_FGD || v5===cv.GC_PR_FGD) ? 255 : 0; }
-        var f2b = T(new cv.Mat());
-        cv.resize(f2, f2b, new cv.Size(sw,sh), 0, 0, cv.INTER_NEAREST);
-        for(var i6=0;i6<sw*sh;i6++) if(f2b.data[i6]>127) votes[i6]++;
+      var sizes = [480].concat((opts.voteSizes!==undefined) ? opts.voteSizes : [420, 540, 450, 510]);
+      var fgSmall = T(new cv.Mat(sh, sw, cv.CV_8UC1, new cv.Scalar(0)));
+      var votes = new Uint8Array(sw*sh), nRuns = 0;
+      for(var ve=0; ve<sizes.length; ve++){
+        var rr = grabRun(sizes[ve], 20261028+ve);
+        var mm = T(new cv.Mat(rr.h, rr.w, cv.CV_8UC1)); mm.data.set(rr.data);
+        var mb = mm;
+        if(rr.w!==sw || rr.h!==sh){ mb = T(new cv.Mat()); cv.resize(mm, mb, new cv.Size(sw,sh), 0, 0, cv.INTER_NEAREST); }
+        for(var i6=0;i6<sw*sh;i6++) if(mb.data[i6]>127) votes[i6]++;
         nRuns++;
       }
       var need = Math.floor(nRuns/2)+1;
@@ -964,6 +1008,19 @@
         if(c.src==='mask') c.support = Math.max(c.support, 0.95-6*c.resid);   // blob contours were already validated by fill/residual
         if(c.support < 0.72) return;
         if(ee.a < 0.012*Math.max(W,H) || ee.a > 0.09*Math.max(W,H)) return;
+        // a coin is never completely surrounded by the bottle's mask (that is a reflection / water line)
+        (function(){
+          var m=72, cin=0, ca5=Math.cos(ee.ang), sa5=Math.sin(ee.ang);
+          for(var i=0;i<m;i++){
+            var t=2*Math.PI*i/m, ex=ee.a*1.2*Math.cos(t), ey=ee.b*1.2*Math.sin(t);
+            var px=Math.round(ee.cx+ex*ca5-ey*sa5), py=Math.round(ee.cy+ex*sa5+ey*ca5);
+            if(px>=0 && py>=0 && px<W && py<H && fg.data[py*W+px]) cin++;
+          }
+          c.ringIn = cin/m;
+        })();
+        if(c.ringIn > 0.85) return;
+        c.inner = outlineSupport(ee.cx*ws, ee.cy*ws, 0.86*ee.a*ws, 0.86*ee.b*ws, ee.ang);
+        if(opts.dbgCands) console.log('cand', c.src, 'a',ee.a.toFixed(0),'cx',ee.cx.toFixed(0),'cy',ee.cy.toFixed(0),'sup',c.support.toFixed(2),'inner',c.inner.toFixed(2),'ringIn',c.ringIn.toFixed(2));
         var inside = ee.cx>bbB.x && ee.cx<bbB.x+bbB.width && ee.cy>bbB.y && ee.cy<bbB.y+bbB.height;
         if(inside){
           // a coin may overlap the bottle only near the bottle's foot (or end, if lying)
@@ -971,7 +1028,7 @@
           else { if(!(ee.cx < bbB.x+0.2*bbB.width || ee.cx > bbB.x+0.8*bbB.width)) return; }
         }
         var dx0 = Math.max(bbB.x-ee.cx, 0, ee.cx-(bbB.x+bbB.width)), dy0 = Math.max(bbB.y-ee.cy, 0, ee.cy-(bbB.y+bbB.height));
-        c.score = c.support - 0.5*Math.hypot(dx0,dy0)/LB - (c.src==='hough'?0.03:0);
+        c.score = c.support - 0.5*Math.hypot(dx0,dy0)/LB - (c.src==='hough'?0.03:0) - 2*Math.max(0, c.ringIn-0.45);
         good.push(c);
       });
       if(good.length){
@@ -987,7 +1044,56 @@
 
       // ---- 3) refine the coin ellipse at full resolution (edge pixels) ----
       var e = coin.e;
+      // 3a) radial edge search: along many rays from the centre take the strongest outer intensity
+      // edge near the current outline, then fit an ellipse robustly (outlier rejection). Much less
+      // sensitive than collecting every Canny pixel (inner bevel, reflections, bottle edges).
       try{
+        var gsm = T(new cv.Mat()); cv.GaussianBlur(gray, gsm, new cv.Size(5,5), 1.1, 1.1);
+        var gd = gsm.data;
+        for(var pass=0; pass<2; pass++){
+        var samp = function(x,y){
+          var x0=Math.floor(x), y0=Math.floor(y); if(x0<0||y0<0||x0>=W-1||y0>=H-1) return null;
+          var fx=x-x0, fy=y-y0, i0=y0*W+x0;
+          return gd[i0]*(1-fx)*(1-fy)+gd[i0+1]*fx*(1-fy)+gd[i0+W]*(1-fx)*fy+gd[i0+W+1]*fx*fy;
+        };
+        var NR=120, ptsR=[], ca7=Math.cos(e.rawAng), sa7=Math.sin(e.rawAng);
+        for(var ir=0; ir<NR; ir++){
+          var ph = 2*Math.PI*ir/NR, dxr=Math.cos(ph), dyr=Math.sin(ph);
+          var ux7 = dxr*ca7+dyr*sa7, uy7 = -dxr*sa7+dyr*ca7;                 // direction in the ellipse frame
+          var r0 = 1/Math.sqrt((ux7/e.w)*(ux7/e.w)+(uy7/e.h)*(uy7/e.h));      // outline radius along this ray
+          var sArr=[], gArr=[], prev=null;
+          for(var sr=0.84*r0; sr<=1.16*r0; sr+=0.5){
+            var vv = samp(e.cx+dxr*sr, e.cy+dyr*sr); if(vv===null){ prev=null; continue; }
+            if(prev!==null){ sArr.push(sr-0.25); gArr.push(Math.abs(vv-prev)); }
+            prev=vv;
+          }
+          if(gArr.length<6) continue;
+          var gm7=0; for(var k7=0;k7<gArr.length;k7++) if(gArr[k7]>gm7) gm7=gArr[k7];
+          if(gm7<6) continue;                                                  // no real edge on this ray
+          var pick=-1;
+          for(var k8=gArr.length-2;k8>=1;k8--){ if(gArr[k8]>=0.4*gm7 && gArr[k8]>=gArr[k8-1] && gArr[k8]>=gArr[k8+1]){ pick=k8; break; } }   // outermost strong peak
+          if(pick<0) continue;
+          ptsR.push(e.cx+dxr*sArr[pick], e.cy+dyr*sArr[pick]);
+        }
+        var okR=false, eR=null;
+        for(var itr=0; itr<4 && ptsR.length/2>=40; itr++){
+          var pmR = T(cv.matFromArray(ptsR.length/2, 1, cv.CV_32FC2, ptsR));
+          eR = fitEllipseInfo(null, pmR); okR = true;
+          var c8=Math.cos(eR.rawAng), s8=Math.sin(eR.rawAng), rs=[], keep=[];
+          for(var q7=0;q7<ptsR.length/2;q7++){
+            var dx8=ptsR[q7*2]-eR.cx, dy8=ptsR[q7*2+1]-eR.cy, xr8=dx8*c8+dy8*s8, yr8=-dx8*s8+dy8*c8;
+            rs.push(Math.sqrt((xr8/eR.w)*(xr8/eR.w)+(yr8/eR.h)*(yr8/eR.h)));
+          }
+          var dev=rs.map(function(x){return Math.abs(x-1);}), dsort=dev.slice().sort(function(p,q){return p-q;});
+          var thr8=Math.max(0.025, 2.5*dsort[dsort.length>>1]);
+          for(var q8=0;q8<rs.length;q8++) if(dev[q8]<=thr8) keep.push(ptsR[q8*2],ptsR[q8*2+1]);
+          if(keep.length===ptsR.length || keep.length/2<40) break;
+          ptsR=keep;
+        }
+        if(okR && eR.a>0 && Math.abs(eR.a-e.a)/e.a<0.2 && eR.b/eR.a>0.2){ e = eR; if(opts.dbgCands) console.log('coin radial fit a=',e.a.toFixed(1),'b=',e.b.toFixed(1),'pts',ptsR.length/2); } else break;
+        }
+      }catch(err){ /* keep the first estimate */ }
+      if(false) try{
         var edges = T(new cv.Mat());
         var g2 = T(new cv.Mat());
         cv.GaussianBlur(gray, g2, new cv.Size(3,3), 0.9, 0.9);
@@ -1317,7 +1423,7 @@
         var rBase0 = 0; for(var q8=0;q8<Math.min(14,rArr.length);q8++) if(rArr[q8]>rBase0) rBase0=rArr[q8];
         var coinLat = Math.abs(-(e.cx-mx)*uy0 + (e.cy-my)*ux0);
         var coinInFront = (opts.standMode!=='diff') && (opts.gapFrac!==0) && (coinLat - e.a < rBase0) && (coinPose==='standing');
-        var gapFracUse = (opts.gapFrac!==undefined) ? +opts.gapFrac : 0.5;
+        var gapFracUse = (opts.gapFrac!==undefined) ? +opts.gapFrac : 0.7;
         var useSame = (opts.standMode==='same') || !(denCb>0.03) || !(denRim>0.03);
         if(useLyingCoin){
           // the table plane is known from the lying coin: intersect the ray of the base rim with it
