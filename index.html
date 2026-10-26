@@ -908,6 +908,60 @@
       var kOpen = T(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksz,ksz)));   // removes thin slivers (counter edge, cables)
       cv.morphologyEx(fg, fg, cv.MORPH_OPEN, kOpen);
       cv.morphologyEx(fg, fg, cv.MORPH_CLOSE, k5);
+      // ---- 1b) leak clipping ----
+      // A clear, empty bottle on a dark glossy table makes the segmentation spill over the table (the dark
+      // surface looks like "not background"). The upper body (cap, neck, shoulders, label) is reliable, so the
+      // widths measured there bound how wide the bottle can be lower down; whatever sticks out sideways below
+      // that, beyond a generous margin, is table, not bottle.
+      var leakClipInfo = null;
+      if(opts.leakClip!==0) (function(){
+        var cL = T(new cv.MatVector()), hL = T(new cv.Mat());
+        // measure on a copy opened with a wide kernel: thin slivers (a tile joint, the edge of another object
+        // next to the cap) would otherwise inflate the widths that bound the bottle
+        var fgM = T(new cv.Mat()); fg.copyTo(fgM);
+        var kk = Math.max(9, Math.round(0.045*W)); if(kk%2===0) kk++;
+        cv.morphologyEx(fgM, fgM, cv.MORPH_OPEN, T(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(kk,kk))));
+        cv.findContours(fgM, cL, hL, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+        var bi=-1, ba=0;
+        for(var i=0;i<cL.size();i++){ var a=cv.contourArea(T(cL.get(i))); if(a>ba){ ba=a; bi=i; } }
+        if(bi<0) return;
+        var cn = T(cL.get(bi)), bb = cv.boundingRect(cn);
+        if(bb.height < bb.width*0.9) return;                  // lying bottle: not handled here
+        var xmn = new Int32Array(H).fill(1e9), xmx = new Int32Array(H).fill(-1);
+        for(var q=0;q<cn.data32S.length/2;q++){ var px=cn.data32S[q*2], py=cn.data32S[q*2+1]; if(px<xmn[py]) xmn[py]=px; if(px>xmx[py]) xmx[py]=px; }
+        var top=bb.y, Lb=bb.height, y0=Math.round(top+0.10*Lb), y1=Math.round(top+0.42*Lb);
+        var ws2=[], c1=[], c2=[];
+        for(var y=y0;y<=y1;y++){ if(xmx[y]<0) continue; ws2.push(xmx[y]-xmn[y]); (y<(y0+y1)/2?c1:c2).push((xmx[y]+xmn[y])/2); }
+        if(ws2.length<20 || !c1.length || !c2.length) return;
+        var sorted = ws2.slice().sort(function(a,b){return a-b;}), wT = sorted[Math.floor(0.75*(sorted.length-1))];
+        var med = function(a){ var b=a.slice().sort(function(u,v){return u-v;}); return b[Math.floor((b.length-1)/2)]; };
+        var m1 = med(c1), m2 = med(c2), yy1 = (y0+(y0+y1)/2)/2, yy2 = ((y0+y1)/2+y1)/2, slope = (m2-m1)/(yy2-yy1);
+        if(Math.abs(slope) > 0.35) return;
+        var leak=false;
+        var maxRatio=0, nWide=0;
+        for(var y2=y1; y2<=bb.y+bb.height-1; y2++){ if(xmx[y2]>=0){ var rr2=(xmx[y2]-xmn[y2])/wT; if(rr2>maxRatio) maxRatio=rr2; if(rr2>1.45) nWide++; } }
+        if(opts.dbgLeak) console.log('leak maxRatio',maxRatio.toFixed(2),'nWide',nWide,'of',bb.y+bb.height-y1,'wT',wT);
+        leak = maxRatio > (opts.leakTrig!==undefined ? +opts.leakTrig : 2.1);
+        if(!leak) return;
+        var lkK=(opts.leakK!==undefined)?+opts.leakK:1.30, lkM=(opts.leakMir!==undefined)?+opts.leakMir:99, lkMK=(opts.leakMirK!==undefined)?+opts.leakMirK:1.03;
+        var halfMax = 0.5*lkK*wT + 0.01*W;
+        for(var y3=y1; y3<H; y3++){
+          var cx = m1 + slope*(y3-yy1), xa = Math.max(0, Math.round(cx-halfMax)), xb = Math.min(W-1, Math.round(cx+halfMax));
+          var row = y3*W;
+          for(var x=0; x<xa; x++) fg.data[row+x]=0;
+          for(var x2=xb+1; x2<W; x2++) fg.data[row+x2]=0;
+          // The bottle is a solid of revolution: if one side still reaches clearly farther from the axis than
+          // the other, the longer side is table, so mirror the shorter (reliable) side.
+          var lm=-1, rm=-1;
+          for(var x3=xa; x3<=xb; x3++) if(fg.data[row+x3]){ if(lm<0) lm=x3; rm=x3; }
+          if(lm<0) continue;
+          var Lh = cx-lm, Rh = rm-cx;
+          if(Rh > lkM*Lh && Lh > 0.30*wT){ var lim=Math.round(cx+lkMK*Lh); for(var x4=lim+1; x4<=xb; x4++) fg.data[row+x4]=0; }
+          else if(Lh > lkM*Rh && Rh > 0.30*wT){ var lim2=Math.round(cx-lkMK*Rh); for(var x5=xa; x5<lim2; x5++) fg.data[row+x5]=0; }
+        }
+        cv.morphologyEx(fg, fg, cv.MORPH_OPEN, kOpen);
+        leakClipInfo = {wT:wT, halfMax:halfMax, axisX:m1, slope:slope};
+      })();
       dbgFg = fg;
 
       var contours = T(new cv.MatVector()), hier = T(new cv.Mat());
@@ -998,19 +1052,36 @@
       }
       // Hough circles: finds a coin even when it overlaps the bottle's base (it is then
       // merged with the bottle in the colour mask and no separate blob exists).
-      try{
-        var hc = T(new cv.Mat());
-        cv.HoughCircles(gw, hc, cv.HOUGH_GRADIENT, 1, Math.max(6, Ww*0.03), 110, 16, Math.max(6, Math.round(Ww*0.018)), Math.round(Ww*0.09));
-        for(var hi2=0; hi2<Math.min(hc.cols, 30); hi2++){
-          var hx=hc.data32F[hi2*3]/ws, hy=hc.data32F[hi2*3+1]/ws, hr=hc.data32F[hi2*3+2]/ws;
-          cands.push({e:{cx:hx, cy:hy, a:hr, b:hr, ang:0, w:hr, h:hr, rawAng:0}, resid:0.03, src:'hough'});
-        }
-      }catch(err){ /* Hough unavailable: mask candidates only */ }
+      // Several Canny/accumulator settings and two working scales: a coin on a dark, glossy table loses
+      // its rim edge in one setting and not in another, so take the union (candidates are validated below).
+      function addHough(cfgs){
+        cfgs.forEach(function(cf){
+          try{
+            var g2w = gw;
+            if(cf[3]===1){
+              var ws2 = ws*0.72; g2w = T(new cv.Mat());
+              cv.resize(gray, g2w, new cv.Size(Math.max(16,Math.round(W*ws2)), Math.max(16,Math.round(H*ws2))), 0, 0, cv.INTER_AREA);
+              cv.GaussianBlur(g2w, g2w, new cv.Size(5,5), 1.2, 1.2);
+            }
+            var sc2 = g2w.cols/W, Wq = g2w.cols;
+            var hc = T(new cv.Mat());
+            cv.HoughCircles(g2w, hc, cv.HOUGH_GRADIENT, 1, Math.max(6, Wq*0.03), cf[1], cf[2], Math.max(6, Math.round(Wq*0.018)), Math.round(Wq*0.09));
+            for(var hi2=0; hi2<Math.min(hc.cols, cf[4]||30); hi2++){
+              var hx=hc.data32F[hi2*3]/sc2, hy=hc.data32F[hi2*3+1]/sc2, hr=hc.data32F[hi2*3+2]/sc2, dup=false;
+              for(var d=0; d<cands.length; d++){ var ce=cands[d].e; if(cands[d].src==='hough' && Math.hypot(ce.cx-hx,ce.cy-hy)<0.25*hr && Math.abs(ce.a-hr)<0.25*hr){ dup=true; break; } }
+              if(!dup) cands.push({e:{cx:hx, cy:hy, a:hr, b:hr, ang:0, w:hr, h:hr, rawAng:0}, resid:0.03, src:'hough'});
+            }
+          }catch(err){ /* Hough unavailable: mask candidates only */ }
+        });
+      }
+      addHough([[1,110,16,0,30]]);
       var bbB = bottleInfo.bb, standingLike = bbB.height >= bbB.width, LB = Math.max(bbB.width, bbB.height);
       var good = [];
+      function scoreAll(){ good = [];
       cands.forEach(function(c){
         var ee = c.e;
         c.support = outlineSupport(ee.cx*ws, ee.cy*ws, ee.a*ws, ee.b*ws, ee.ang);
+        if(opts.dbgCands2) console.log('c0',c.src,'a',ee.a.toFixed(0),'cx',ee.cx.toFixed(0),'cy',ee.cy.toFixed(0),'sup',c.support.toFixed(2));
         if(c.src==='mask') c.support = Math.max(c.support, 0.95-6*c.resid);   // blob contours were already validated by fill/residual
         if(c.support < 0.72) return;
         if(ee.a < 0.012*Math.max(W,H) || ee.a > 0.09*Math.max(W,H)) return;
@@ -1030,13 +1101,41 @@
         var inside = ee.cx>bbB.x && ee.cx<bbB.x+bbB.width && ee.cy>bbB.y && ee.cy<bbB.y+bbB.height;
         if(inside){
           // a coin may overlap the bottle only near the bottle's foot (or end, if lying)
-          if(standingLike){ if(ee.cy < bbB.y + 0.80*bbB.height) return; }
+          if(standingLike){ if(ee.cy < bbB.y + 0.80*bbB.height) return; if(Math.min(ee.cx-bbB.x, bbB.x+bbB.width-ee.cx) > 1.15*ee.a && c.ringIn < 0.15) return; }
           else { if(!(ee.cx < bbB.x+0.2*bbB.width || ee.cx > bbB.x+0.8*bbB.width)) return; }
         }
         var dx0 = Math.max(bbB.x-ee.cx, 0, ee.cx-(bbB.x+bbB.width)), dy0 = Math.max(bbB.y-ee.cy, 0, ee.cy-(bbB.y+bbB.height));
-        c.score = c.support - 0.5*Math.hypot(dx0,dy0)/LB - (c.src==='hough'?0.03:0) - 2*Math.max(0, c.ringIn-0.45);
+        c.score = c.support - (opts.distK!==undefined?+opts.distK:1.2)*Math.hypot(dx0,dy0)/LB - (c.src==='hough'?0.03:0) - 2*Math.max(0, c.ringIn-0.45);
+        // a coin that floats in the middle of the bottle's own width without touching its silhouette is the
+        // lost lower body of a clear bottle (liquid drips, feet), not a coin: a real coin is beside the bottle
+        // or overlaps its silhouette
+        if(standingLike && opts.latPrior!==0){
+          var fx = (ee.cx-bbB.x)/Math.max(1,bbB.width);
+          if(fx > 0.12 && fx < 0.88 && c.ringIn < 0.15) c.score -= 0.4;
+        }
+        // size sanity: a coin (2.2-2.5 cm) next to a drinks bottle (5-10 cm wide) has a radius of roughly 0.2-0.4
+        // of the bottle's half-width; much larger discs are burners, plates, lids or tiles
+        if(standingLike && opts.sizePrior!==0){
+          var fr = ee.a/Math.max(1, bbB.width/2);
+          c.score -= 3.0*Math.max(0, fr-0.40);
+        }
+        // among discs clear of the bottle's silhouette, prefer the one with a raised inner rim (edge support just inside
+        // the outline): burners, plates and tile marks usually lack it
+        if(opts.innerPrior!==0 && c.ringIn < 0.15) c.score += 0.6*(c.inner-0.6);
+        if(opts.dbgCands) console.log('  a', ee.a.toFixed(0), 'cx', ee.cx.toFixed(0), 'cy', ee.cy.toFixed(0), 'score', c.score.toFixed(2));
+        // the coin lies on the same table as the bottle: its centre is at about the height of the bottle's foot
+        if(standingLike && opts.coinBandPrior!==0) c.score -= 1.0*Math.max(0, Math.abs(ee.cy-(bbB.y+bbB.height))/LB - 0.22);
         good.push(c);
       });
+      }
+      scoreAll();
+      // nothing convincing with the standard Hough setting (a coin on a dark, glossy table can lose its rim edge):
+      // retry with more sensitive settings and a second working scale
+      var bestSc = good.reduce(function(m,c){ return Math.max(m,c.score); }, -9);
+      if(opts.houghRetry!==0 && (!good.length || bestSc < 0.55)){
+        addHough([[1,70,14,0,90],[1,110,16,1,90],[1,60,13,1,90]]);
+        scoreAll();
+      }
       if(good.length){
         good.sort(function(p,q2){ return q2.score-p.score; });
         coin = good[0];
