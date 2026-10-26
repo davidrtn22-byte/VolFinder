@@ -873,7 +873,7 @@
             if(opts.seedBand!==0 && (y>=h1-band1*1.5 || x<band1 || x>=w1-band1 || (opts.topBand && y<band1))) v = cv.GC_PR_BGD;
             if(y<ring1 || y>=h1-ring1*bmul || x<ring1 || x>=w1-ring1) v = cv.GC_BGD;
             if((x-cx1)*(x-cx1)+(y-cy1)*(y-cy1) < rc1*rc1) v = cv.GC_FGD;
-            if(useStrip && Math.abs(x-cx1) < useStrip*w1 && y>0.22*h1 && y<0.7*h1) v = cv.GC_FGD;
+            if(useStrip && Math.abs(x-cx1) < useStrip*w1 && y>0.22*h1 && y<(opts.stripY1!==undefined?+opts.stripY1:0.7)*h1) v = cv.GC_FGD;
             gm.data[y*w1+x] = v;
           }
         }
@@ -1162,6 +1162,15 @@
       }
       bottleInfo = {idx:-1, cnt:best3, area:bestA3, bb:bb3, touches: bb3.x<=1 || bb3.y<=1 || bb3.x+bb3.width>=W-1 || bb3.y+bb3.height>=H-1};
 
+      // The silhouette must reach the table: the bottle's foot is at about the same height in the picture as the
+      // coin's bottom edge. If the mask stops far above it, the lower body (clear plastic over a dark surface) was
+      // lost, and every later number (length, depth, volume) would be wrong: ask for a better photo instead.
+      if(opts.baseGuard!==0 && bb3.height>=bb3.width){
+        var coinBotY = e.cy + Math.max(e.a, e.b), maskBotY = bb3.y + bb3.height;
+        if(coinBotY - maskBotY > 0.12*H){
+          return fail('No se detectó la parte baja del envase (cintura y base): suele pasar con envases transparentes y vacíos sobre un fondo oscuro. Llena el envase (con agua u otro líquido), o pon una hoja blanca detrás de la base, y repite la foto.');
+        }
+      }
       var q = e.b/e.a;
       if(q > 0.97) q = 1;           // near-circular: ellipse orientation is just noise
       var pxPerCm = (2*e.a)/coinDcm;
@@ -1421,6 +1430,10 @@
         ysBase.sort(function(a,b){return a-b;});
         baseBottomY = ysBase[Math.min(ysBase.length-1, Math.floor(0.9*ysBase.length))];
         if(opts.baseY!==undefined) baseBottomY=+opts.baseY;
+        // A bottle's foot is never clearly ABOVE the coin's bottom edge when the coin stands beside it at the same
+        // distance (observed: the foot is 2-4 % of the picture height below it). If the mask says otherwise, the clear
+        // plastic of the foot was lost against a dark table: use the coin's bottom edge as the base row.
+        if(opts.baseFloor!==0 && baseBottomY < coinBottomY - 0.015*H) baseBottomY = coinBottomY;
         var lamContact = lamC + Rcm*sp;              // coin's ground-contact point (R below its centre)
         var ynCb = (coinBottomY-cyI)/f, ynRim = (baseBottomY-cyI)/f;
         var denCb = cp*ynCb + sp, denRim = cp*ynRim + sp;
